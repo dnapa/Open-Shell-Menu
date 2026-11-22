@@ -167,6 +167,7 @@ private:
 		COLLECT_KEYWORDS   =0x20, // include the keywords
 		COLLECT_LIBRARY    =0x40, // the folder is a library
 		COLLECT_NOREFRESH  =0x80, // suppress the refresh message
+		COLLECT_WINDOWS_TOOLS=0x100, // skip packaged apps exposed by the Windows Tools virtual folder
 
 		COLLECT_IS_FOLDER =0x8000
 	};

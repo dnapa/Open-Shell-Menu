@@ -13,6 +13,7 @@
 #include "ResourceHelper.h"
 #include "LogManager.h"
 #include "Translations.h"
+#include <appmodel.h>
 #include <propkey.h>
 #include <searchapi.h>
 #include <ntquery.h>
@@ -288,8 +289,24 @@ static const wchar_t *g_pProgramExtensions[]=
 	L".SCR",
 };
 
+static bool IsPackagedWindowsToolsItem( IShellItem *pItem )
+{
+	// Windows Tools can expose packaged app shortcuts without package metadata.
+	static const auto parseAppId=reinterpret_cast<decltype(&ParseApplicationUserModelId)>(
+		GetProcAddress(GetModuleHandleW(L"kernel32.dll"),"ParseApplicationUserModelId"));
+	CComQIPtr<IShellItem2> pItem2=pItem;
+	CComString appId;
+	if (!parseAppId || !pItem2 || FAILED(pItem2->GetString(PKEY_AppUserModel_ID,&appId)) || !appId)
+		return false;
+	UINT32 familyLength=0,relativeIdLength=0;
+	return parseAppId(appId,&familyLength,NULL,&relativeIdLength,NULL)==ERROR_INSUFFICIENT_BUFFER;
+}
+
 bool CSearchManager::AddSearchItem( IShellItem *pItem, const wchar_t *name, int flags, TItemCategory category, SearchRequest &searchRequest )
 {
+	if ((flags&COLLECT_WINDOWS_TOOLS) && IsPackagedWindowsToolsItem(pItem))
+		return false;
+
 	CAbsolutePidl pidl;
 	if (FAILED(SHGetIDListFromObject(pItem,&pidl)))
 		return false;
@@ -767,7 +784,7 @@ void CSearchManager::SearchThread( void )
 				{
 					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_CommonAdminTools,&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
+						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_NOREFRESH|COLLECT_WINDOWS_TOOLS,CATEGORY_SETTING,searchRequest);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
