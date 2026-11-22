@@ -17,6 +17,7 @@
 #include <searchapi.h>
 #include <ntquery.h>
 #include <algorithm>
+#include <set>
 
 // attempt to get more accurate PIDLs for the search results by laundering them through a search folder.
 // this produces better search items for the CSC search connector (better icons and behavior) but is slow.
@@ -295,6 +296,7 @@ bool CSearchManager::AddSearchItem( IShellItem *pItem, const wchar_t *name, int 
 
 	SearchItem item;
 	item.category=CATEGORY_INVALID;
+	bool bProgramShortcut=false;
 	item.pInfo=g_ItemManager.GetItemInfo(pItem,pidl,CItemManager::INFO_LINK|((flags&COLLECT_METRO)?CItemManager::INFO_METRO:0));
 	{
 		CItemManager::RWLock lock(&g_ItemManager,false,CItemManager::RWLOCK_ITEMS);
@@ -311,6 +313,22 @@ bool CSearchManager::AddSearchItem( IShellItem *pItem, const wchar_t *name, int 
 		}
 		else
 			item.name=name;
+		bProgramShortcut=category==CATEGORY_PROGRAM && searchRequest.bSearchMetroApps && GetWinVersion()>=WIN_VER_WIN10 &&
+			_wcsicmp(PathFindExtension(item.pInfo->GetPath()),L".lnk")==0;
+		if (bProgramShortcut)
+			item.shortcutAppId=item.pInfo->GetAppid();
+	}
+	if (bProgramShortcut)
+	{
+		// Some shortcuts expose the app ID only as their target parsing name.
+		if (item.shortcutAppId.IsEmpty())
+		{
+			CComQIPtr<IShellItem2> pItem2=pItem;
+			CComString target;
+			if (pItem2 && SUCCEEDED(pItem2->GetString(PKEY_Link_TargetParsingPath,&target)) && target)
+				item.shortcutAppId=target;
+		}
+		StringUpper(item.shortcutAppId);
 	}
 	if (flags&COLLECT_KEYWORDS)
 	{
@@ -684,15 +702,29 @@ void CSearchManager::SearchThread( void )
 				{
 					std::vector<MetroLink> links;
 					GetMetroLinks(links,true);
+					std::set<CString> appIds;
+					{
+						Lock lock(this,LOCK_DATA);
+						for (const SearchItem &item : m_ProgramItems)
+							if (!item.shortcutAppId.IsEmpty())
+								appIds.insert(item.shortcutAppId);
+					}
 					for (std::vector<MetroLink>::const_iterator it=links.begin();it!=links.end();++it)
 					{
 						if (GetWinVersion()<WIN_VER_WIN10)
 							AddSearchItem(it->pItem,L"",COLLECT_PROGRAMS|COLLECT_METRO|COLLECT_ONLY_METRO,CATEGORY_PROGRAM,searchRequest);
 						else
 						{
-							CComString pName;
-							if (SUCCEEDED(it->pItem->GetDisplayName(SIGDN_NORMALDISPLAY,&pName)))
-							AddSearchItem(it->pItem,pName,COLLECT_PROGRAMS|COLLECT_METRO,CATEGORY_PROGRAM,searchRequest);
+							CString appId=it->appid;
+							StringUpper(appId);
+							if (appId.IsEmpty() || appIds.find(appId)==appIds.end())
+							{
+								CComString pName;
+								if (SUCCEEDED(it->pItem->GetDisplayName(SIGDN_NORMALDISPLAY,&pName)) &&
+									AddSearchItem(it->pItem,pName,COLLECT_PROGRAMS|COLLECT_METRO,CATEGORY_PROGRAM,searchRequest) &&
+									!appId.IsEmpty())
+									appIds.insert(appId);
+							}
 						}
 						if (searchRequest.requestId<m_LastProgramsRequestId)
 							continue;

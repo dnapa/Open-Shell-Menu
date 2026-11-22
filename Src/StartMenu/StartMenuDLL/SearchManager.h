@@ -94,6 +94,7 @@ private:
 		TItemCategory category;
 		CString name; // uppercase
 		CString keywords; // uppercase
+		CString shortcutAppId; // uppercase AppUserModelID or target parsing name
 		const CItemManager::ItemInfo *pInfo;
 		int rank; // ignore the item if rank<0
 		bool bMetroLink;
