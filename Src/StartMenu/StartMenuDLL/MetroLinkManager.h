@@ -24,6 +24,8 @@ struct MetroLink
 	CComPtr<IShellItem> pItem;
 };
 
+bool IsPackagedAppId( const wchar_t *appId );
+
 // Returns a list of links for all metro apps
 void GetMetroLinks( std::vector<MetroLink> &links, bool bLog, std::vector<CString> *pNonApps10=NULL );
 

@@ -34,6 +34,7 @@
 #define SECURITY_WIN32
 #include <Security.h>
 #include <algorithm>
+#include <set>
 #include <wuapi.h>
 
 struct StdMenuOption
@@ -1540,6 +1541,8 @@ void CMenuContainer::UpdateAutoComplete( const wchar_t *text )
 struct UserAssistItem
 {
 	wchar_t name[_MAX_PATH];
+	wchar_t appid[_MAX_PATH];
+	bool bPackagedShortcut;
 	float rank;
 	FILETIME timestamp;
 	unsigned int mfuHash; // original case
@@ -1588,37 +1591,86 @@ static const wchar_t *g_MfuIgnoreExes[]={
 	L"WUAPP.EXE",
 };
 
-static bool IgnoreUserAssistItem(const UserAssistItem& uaItem)
+static CString GetRecentPackagedAppId( const CItemManager::ItemInfo *pInfo, const CString &path, IShellItem *pItem=NULL )
 {
-	static constexpr const wchar_t* ignoredNames[] =
+	CString appId;
 	{
-		DESKTOP_APP_ID,
-		L"Microsoft.Windows.ShellExperienceHost_cw5n1h2txyewy!App",
-	};
-
-	for (const auto& name : ignoredNames)
-	{
-		if (_wcsicmp(uaItem.name, name) == 0)
-			return true;
+		CItemManager::RWLock lock(&g_ItemManager,false,CItemManager::RWLOCK_ITEMS);
+		appId=pInfo->GetAppid();
 	}
+	if (IsPackagedAppId(appId))
+		return appId;
 
-	return false;
+	// Some filesystem shortcuts carry the AUMID only in their Shell target.
+	if (_wcsicmp(PathFindExtension(path),L".lnk")!=0)
+		return CString();
+	CComPtr<IShellItem> link;
+	if (!pItem && SUCCEEDED(SHCreateItemFromIDList(pInfo->GetPidl(),IID_PPV_ARGS(&link))))
+		pItem=link;
+	CComQIPtr<IShellItem2> pItem2=pItem;
+	CComString target;
+	if (pItem2 && SUCCEEDED(pItem2->GetString(PKEY_Link_TargetParsingPath,&target)) && IsPackagedAppId(target))
+		return CString(target);
+	return CString();
+}
+
+static bool IsVisibleProgramsShortcut( const CString &path, const wchar_t *userPrograms, const wchar_t *commonPrograms )
+{
+	if (_wcsicmp(PathFindExtension(path),L".lnk")!=0)
+		return false;
+
+	int rootLength=0;
+	for (const wchar_t *root : {userPrograms,commonPrograms})
+	{
+		if (!root || !*root)
+			continue;
+		const int len=Strlen(root);
+		if (path.GetLength()>len && path[len]==L'\\' && _wcsnicmp(path,root,len)==0)
+		{
+			rootLength=len;
+			break;
+		}
+	}
+	if (!rootLength)
+		return false;
+
+	// Check the shortcut and every parent beneath the Programs folder.
+	CString candidate=path;
+	while (candidate.GetLength()>rootLength)
+	{
+		const DWORD attributes=GetFileAttributes(candidate);
+		if (attributes==INVALID_FILE_ATTRIBUTES || (attributes&FILE_ATTRIBUTE_HIDDEN))
+			return false;
+		candidate.Truncate(candidate.ReverseFind(L'\\'));
+	}
+	return true;
 }
 
 void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCount )
 {
 	bool bShowMetro=GetSettingBool(L"RecentMetroApps");
+	const bool bPackagedShortcuts=GetWinVersion()>=WIN_VER_WIN10;
+	CComString userPrograms,commonPrograms;
+	if (bPackagedShortcuts && bShowMetro)
+	{
+		ShGetKnownFolderPath(FOLDERID_Programs,&userPrograms);
+		if (!s_bNoCommonFolders)
+			ShGetKnownFolderPath(FOLDERID_CommonPrograms,&commonPrograms);
+	}
 	const std::vector<MenuItem> &mainItems=s_Menus[0]->m_Items;
 
 	int iconSizeFlag=(!m_bSubMenu && s_Skin.Main_icon_size==MenuSkin::ICON_SIZE_LARGE)?CItemManager::INFO_LARGE_ICON:CItemManager::INFO_SMALL_ICON;
 	if (s_RecentPrograms==RECENT_PROGRAMS_RECENT)
 	{
+		std::set<CString> shownPackagedApps;
 		for (int i=0;i<MRU_PROGRAMS_COUNT;i++)
 		{
 			if (s_MRUShortcuts[i].IsEmpty()) break;
 			CComPtr<IShellItem> pItem;
 			CAbsolutePidl pidl;
 			bool bApp=(wcsncmp(s_MRUShortcuts[i],L"APP:",4)==0);
+			if (bPackagedShortcuts && bApp)
+				continue; // Only show packaged apps with a recorded Programs shortcut.
 			if (bApp)
 			{
 				if (SUCCEEDED(SHCreateItemInKnownFolder(FOLDERID_AppsFolder2,0,(const wchar_t*)s_MRUShortcuts[i]+4,IID_IShellItem,(void**)&pItem)) && FAILED(SHGetIDListFromObject(pItem,&pidl)))
@@ -1638,6 +1690,13 @@ void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCou
 					item.bLink=true;
 					int refreshFlags=CItemManager::INFO_LINK|CItemManager::INFO_LINK_APPID|CItemManager::INFO_METRO|iconSizeFlag;
 					item.pItemInfo=g_ItemManager.GetItemInfo(pItem,pidl,refreshFlags);
+					CString packagedAppId;
+					if (bPackagedShortcuts)
+					{
+						packagedAppId=GetRecentPackagedAppId(item.pItemInfo,s_MRUShortcuts[i],pItem);
+						if (!packagedAppId.IsEmpty() && (!bShowMetro || !IsVisibleProgramsShortcut(s_MRUShortcuts[i],userPrograms,commonPrograms)))
+							continue;
+					}
 
 					// see if it is already in the main menu
 					bool bFound=false;
@@ -1683,6 +1742,14 @@ void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCou
 						}
 					}
 					if (bFound) continue;
+					if (!packagedAppId.IsEmpty())
+					{
+						StringUpper(packagedAppId);
+						if (!shownPackagedApps.insert(packagedAppId).second)
+							continue;
+						item.SetName(pName,(m_Options&CONTAINER_NOEXTENSIONS)!=0);
+					}
+					else
 					{
 						CItemManager::RWLock lock(&g_ItemManager,false,CItemManager::RWLOCK_ITEMS);
 						if (item.pItemInfo->IsMetroApp() && !bShowMetro)
@@ -1826,7 +1893,14 @@ void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCou
 				LOG_MENU(LOG_MFU,L"UserAssist: Dropping: File missing");
 				continue;
 			}
-			wchar_t appid[_MAX_PATH];
+			CString packagedAppId;
+			if (bPackagedShortcuts)
+			{
+				packagedAppId=GetRecentPackagedAppId(uaItem.pLinkInfo,uaItem.name);
+				if (!packagedAppId.IsEmpty() && (!bShowMetro || !IsVisibleProgramsShortcut(uaItem.name,userPrograms,commonPrograms)))
+					continue;
+			}
+			uaItem.bPackagedShortcut=!packagedAppId.IsEmpty();
 			{
 				CItemManager::RWLock lock(&g_ItemManager,false,CItemManager::RWLOCK_ITEMS);
 				if (uaItem.pLinkInfo->GetLocation()!=CItemManager::LOCATION_START_MENU && uaItem.pLinkInfo->GetLocation()!=CItemManager::LOCATION_METRO && uaItem.pLinkInfo->GetLocation()!=CItemManager::LOCATION_GAMES)
@@ -1839,7 +1913,8 @@ void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCou
 					LOG_MENU(LOG_MFU,L"UserAssist: Dropping: No pin");
 					continue;
 				}
-				if (uaItem.pLinkInfo->GetAppid().IsEmpty())
+				const CString &appId=uaItem.bPackagedShortcut?packagedAppId:uaItem.pLinkInfo->GetAppid();
+				if (appId.IsEmpty())
 				{
 					LOG_MENU(LOG_MFU,L"UserAssist: Dropping: No AppId");
 					continue;
@@ -1855,7 +1930,7 @@ void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCou
 							break;
 						}
 				}
-				if (uaItem.pLinkInfo->IsMetroLink())
+				if (!uaItem.bPackagedShortcut && uaItem.pLinkInfo->IsMetroLink())
 				{
 					if (!bShowMetro)
 					{
@@ -1874,142 +1949,42 @@ void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCou
 					}
 				}
 				if (bIgnore) continue;
-				Strcpy(appid,_countof(appid),uaItem.pLinkInfo->GetAppid());
+				Strcpy(uaItem.appid,_countof(uaItem.appid),appId);
 			}
 
 			uaItem.timestamp=data.timestamp;
-			size=sizeof(data);
-			EncodeRot13(appid);
-			if (regKeyApp.QueryBinaryValue(appid,&data,&size)!=ERROR_SUCCESS)
+			if (!uaItem.bPackagedShortcut)
 			{
-				LOG_MENU(LOG_MFU,L"UserAssist: Dropping: Missing appid entry: '%s'",appid);
-				continue;
-			}
-			if (CompareFileTime(&uaItem.timestamp,&data.timestamp)<0)
-				uaItem.timestamp=data.timestamp;
-
-			{
-				float rank=data.count/10.f;
-				float weight=0.95f;
-				for (int i=0, idx=data.last;i<_countof(data.history);i++,idx=(idx+9)%10,weight-=0.07f)
+				size=sizeof(data);
+				wchar_t appid[_MAX_PATH];
+				Strcpy(appid,_countof(appid),uaItem.appid);
+				EncodeRot13(appid);
+				if (regKeyApp.QueryBinaryValue(appid,&data,&size)!=ERROR_SUCCESS)
 				{
-					float h=data.history[idx];
-					if (h<0 || h>1) break;
-					rank+=h*weight;
+					LOG_MENU(LOG_MFU,L"UserAssist: Dropping: Missing appid entry: '%s'",appid);
+					continue;
 				}
-				if (uaItem.rank<rank)
+				if (CompareFileTime(&uaItem.timestamp,&data.timestamp)<0)
+					uaItem.timestamp=data.timestamp;
+
 				{
-					uaItem.rank=rank;
-					LOG_MENU(LOG_MFU,L"UserAssist: Corrected rank: %.3f",rank);
+					float rank=data.count/10.f;
+					float weight=0.95f;
+					for (int i=0, idx=data.last;i<_countof(data.history);i++,idx=(idx+9)%10,weight-=0.07f)
+					{
+						float h=data.history[idx];
+						if (h<0 || h>1) break;
+						rank+=h*weight;
+					}
+					if (uaItem.rank<rank)
+					{
+						uaItem.rank=rank;
+						LOG_MENU(LOG_MFU,L"UserAssist: Corrected rank: %.3f",rank);
+					}
 				}
 			}
 
 			uaItems.push_back(uaItem);
-		}
-
-		if (GetWinVersion()>=WIN_VER_WIN10 && bShowMetro)
-		{
-			// collect apps with positive rank from regKeyApp
-			for (int idx=0;;idx++)
-			{
-				UserAssistItem uaItem;
-				memset(&uaItem,0,sizeof(uaItem));
-				DWORD len=_countof(uaItem.name);
-				UserAssistData data;
-				memset(&data,0,sizeof(data));
-				DWORD size=sizeof(data);
-				DWORD type;
-				LONG res=RegEnumValue(regKeyApp,idx,uaItem.name,&len,NULL,&type,(BYTE*)&data,&size);
-				if (res==ERROR_NO_MORE_ITEMS)
-					break;
-				if (!*uaItem.name)
-					continue;
-				if (type!=REG_BINARY)
-				{
-					LOG_MENU(LOG_MFU,L"Not binary: '%s'",uaItem.name);
-					continue;
-				}
-				if (size!=sizeof(data))
-				{
-					LOG_MENU(LOG_MFU,L"Wrong size (%d): '%s'",size,uaItem.name);
-					continue;
-				}
-				uaItem.mfuHash=CalcFNVHash(uaItem.name);
-				EncodeRot13(uaItem.name);
-				if (data.timestamp.dwLowDateTime==0 && data.timestamp.dwHighDateTime==0)
-				{
-					LOG_MENU(LOG_MFU,L"Zero timestamp: '%s'",uaItem.name);
-					continue;
-				}
-
-				// determine rank
-				uaItem.rank=data.count/10.f;
-				float weight=0.95f;
-				for (int i=0, idx=data.last;i<_countof(data.history);i++,idx=(idx+9)%10,weight-=0.07f)
-				{
-					float h=data.history[idx];
-					if (h<0 || h>1) break;
-					uaItem.rank+=h*weight;
-				}
-				if (uaItem.rank==0)
-				{
-					LOG_MENU(LOG_MFU,L"Zero rank: '%s'",uaItem.name);
-					continue;
-				}
-
-				if (IgnoreUserAssistItem(uaItem))
-				{
-					LOG_MENU(LOG_MFU,L"UserAssist: Dropping: Ignore '%s'",uaItem.name);
-					continue;
-				}
-
-				uaItem.pLinkInfo=g_ItemManager.GetMetroAppInfo10(uaItem.name);
-				if (!uaItem.pLinkInfo)
-				{
-					LOG_MENU(LOG_MFU,L"UserAssist: Dropping '%s': Not a valid app",uaItem.name);
-					continue;
-				}
-
-				LOG_MENU(LOG_MFU,L"UserAssist: '%s', %d, %.3f",uaItem.name,data.count,uaItem.rank);
-				{
-					CItemManager::RWLock lock(&g_ItemManager,false,CItemManager::RWLOCK_ITEMS);
-					if (uaItem.pLinkInfo->GetMetroName().IsEmpty() || wcsncmp(uaItem.pLinkInfo->GetMetroName(), L"@{",2)==0)
-					{
-						LOG_MENU(LOG_MFU, L"UserAssist: Dropping: No metro name");
-						continue;
-					}
-					if (uaItem.pLinkInfo->IsNoPin())
-					{
-						LOG_MENU(LOG_MFU,L"UserAssist: Dropping: No pin");
-						continue;
-					}
-					if (uaItem.pLinkInfo->GetPackagePath().IsEmpty() || GetFileAttributes(uaItem.pLinkInfo->GetPackagePath())==INVALID_FILE_ATTRIBUTES)
-					{
-						LOG_MENU(LOG_MFU,L"UserAssist: Dropping: Missing package path");
-						continue;
-					}
-
-					CAbsolutePidl pidl=uaItem.pLinkInfo->GetPidl();
-
-					// see if it is already in the main menu
-					bool bFound=false;
-					for (std::vector<MenuItem>::const_iterator it=mainItems.begin();it!=mainItems.end();++it)
-					{
-						if (!it->pItemInfo) continue;
-						if (!it->pItemInfo->IsLink()) continue;
-						if (ILIsEqual(pidl,it->pItemInfo->GetTargetPidl()))
-						{
-							LOG_MENU(LOG_MFU,L"UserAssist: Dropping '%s', already in main menu",uaItem.name);
-							bFound=true;
-							break;
-						}
-					}
-					if (bFound) continue;
-				}
-
-				uaItem.timestamp=data.timestamp;
-				uaItems.push_back(uaItem);
-			}
 		}
 
 		// sort by rank
@@ -2027,10 +2002,10 @@ void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCou
 			CString appid, targetPATH, metroName;
 			{
 				CItemManager::RWLock lock(&g_ItemManager,false,CItemManager::RWLOCK_ITEMS);
-				bMetroLink=uaItem.pLinkInfo->IsMetroLink();
-				bMetroApp=uaItem.pLinkInfo->IsMetroApp();
+				bMetroLink=!uaItem.bPackagedShortcut && uaItem.pLinkInfo->IsMetroLink();
+				bMetroApp=!uaItem.bPackagedShortcut && uaItem.pLinkInfo->IsMetroApp();
 				bExplicitAppId=uaItem.pLinkInfo->IsExplicitAppId();
-				appid=uaItem.pLinkInfo->GetAppid();
+				appid=uaItem.appid;
 				targetPATH=uaItem.pLinkInfo->GetTargetPATH();
 				if (bMetroLink)
 					metroName=uaItem.pLinkInfo->GetMetroName();
@@ -2039,7 +2014,7 @@ void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCou
 				{
 					UserAssistItem &uaItem2=uaItems[j];
 					if (!uaItem2.pLinkInfo) continue;
-					if (_wcsicmp(appid,uaItem2.pLinkInfo->GetAppid())==0)
+					if (_wcsicmp(appid,uaItem2.appid)==0)
 					{
 						LOG_MENU(LOG_MFU,L"UserAssist: Dropping '%s', duplicate appid '%s'",uaItem2.name,appid);
 						uaItem2.pLinkInfo=NULL;

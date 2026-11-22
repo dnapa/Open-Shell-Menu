@@ -9,6 +9,7 @@
 #include "FNVHash.h"
 #include "ResourceHelper.h"
 #include "Translations.h"
+#include <appmodel.h>
 #include <propkey.h>
 #include <map>
 
@@ -25,6 +26,17 @@ PROPERTYKEY PKEY_Launcher_AppState={{0x0ded77b3, 0xc614, 0x456c, {0xae, 0x5b, 0x
 KNOWNFOLDERID FOLDERID_AppsFolder2={0x1E87508D,0x89C2,0x42F0,{0x8A,0x7E,0x64,0x5A,0x0F,0x50,0xCA,0x58}}; // similar to shell:::{4234d49b-0245-4df3-b780-3893943456e1}
 GUID CLSID_PinExt={0x90AA3A4E,0x1CBA,0x4233,{0xB8,0xBB,0x53,0x57,0x73,0xD4,0x84,0x49}};
 const wchar_t *MetroAppClassId=L"Launcher.ImmersiveApplication";
+
+bool IsPackagedAppId( const wchar_t *appId )
+{
+	if (!appId || !wcschr(appId,L'!'))
+		return false;
+
+	static const auto parseAppId=reinterpret_cast<decltype(&ParseApplicationUserModelId)>(
+		GetProcAddress(GetModuleHandleW(L"kernel32.dll"),"ParseApplicationUserModelId"));
+	UINT32 familyLength=0,relativeIdLength=0;
+	return parseAppId && parseAppId(appId,&familyLength,NULL,&relativeIdLength,NULL)==ERROR_INSUFFICIENT_BUFFER;
+}
 
 // Returns a list of links for all metro apps
 void GetMetroLinks( std::vector<MetroLink> &links, bool bLog, std::vector<CString> *pNonApps10 )

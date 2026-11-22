@@ -13,7 +13,6 @@
 #include "ResourceHelper.h"
 #include "LogManager.h"
 #include "Translations.h"
-#include <appmodel.h>
 #include <propkey.h>
 #include <searchapi.h>
 #include <ntquery.h>
@@ -292,14 +291,9 @@ static const wchar_t *g_pProgramExtensions[]=
 static bool IsPackagedWindowsToolsItem( IShellItem *pItem )
 {
 	// Windows Tools can expose packaged app shortcuts without package metadata.
-	static const auto parseAppId=reinterpret_cast<decltype(&ParseApplicationUserModelId)>(
-		GetProcAddress(GetModuleHandleW(L"kernel32.dll"),"ParseApplicationUserModelId"));
 	CComQIPtr<IShellItem2> pItem2=pItem;
 	CComString appId;
-	if (!parseAppId || !pItem2 || FAILED(pItem2->GetString(PKEY_AppUserModel_ID,&appId)) || !appId)
-		return false;
-	UINT32 familyLength=0,relativeIdLength=0;
-	return parseAppId(appId,&familyLength,NULL,&relativeIdLength,NULL)==ERROR_INSUFFICIENT_BUFFER;
+	return pItem2 && SUCCEEDED(pItem2->GetString(PKEY_AppUserModel_ID,&appId)) && IsPackagedAppId(appId);
 }
 
 bool CSearchManager::AddSearchItem( IShellItem *pItem, const wchar_t *name, int flags, TItemCategory category, SearchRequest &searchRequest )

@@ -1859,6 +1859,7 @@ void CMenuContainer::ActivateItem( int index, TActivateType type, const POINT *p
 		_bIsLink=item.pItemInfo->IsLink();
 		_bExplicitAppId=item.pItemInfo->IsExplicitAppId();
 	}
+	const bool bTrackRecentAsApp=_bMetroApp && (GetWinVersion()<WIN_VER_WIN10 || _wcsicmp(PathFindExtension(_path),L".lnk")!=0);
 
 	// create a context menu for the selected item. the context menu can be shown (ACTIVATE_MENU) or its default
 	// item can be executed automatically (ACTIVATE_EXECUTE)
@@ -2894,14 +2895,14 @@ void CMenuContainer::ActivateItem( int index, TActivateType type, const POINT *p
 		if (s_RecentPrograms==RECENT_PROGRAMS_RECENT)
 		{
 			CComString pName;
-			if (_bMetroApp)
+			if (bTrackRecentAsApp)
 				DeleteMRUAppId(_appId);
 			else if (SUCCEEDED(pItem->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING,&pName)))
 				DeleteMRUShortcut(pName);
 		}
 		else if (s_RecentPrograms==RECENT_PROGRAMS_FREQUENT)
 		{
-			RemoveMFUShortcut(item.mfuHash,_bMetroApp);
+			RemoveMFUShortcut(item.mfuHash,bTrackRecentAsApp);
 		}
 		PostRefreshMessage();
 		res=0;
@@ -3188,7 +3189,7 @@ void CMenuContainer::ActivateItem( int index, TActivateType type, const POINT *p
 			{
 				if (bTrackRecent)
 				{
-					if (_bMetroApp)
+					if (bTrackRecentAsApp)
 						AddMRUAppId(_appId);
 					else if (_path.IsEmpty())
 					{
