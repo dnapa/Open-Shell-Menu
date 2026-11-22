@@ -1,0 +1,75 @@
+name: Start Menu development ZIP
+
+on:
+  push:
+    branches:
+      - start-menu-dev
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    env:
+      CS_VERSION: '4.4.203'
+      CS_VERSION_ORIG: '4.4.203'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Restore Start Menu dependency
+        shell: pwsh
+        run: nuget restore Src\Lib\packages.config -PackagesDirectory Src\packages -NonInteractive
+
+      - name: Build Start Menu for x64
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $msbuild = & $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -find 'MSBuild\Current\Bin\MSBuild.exe' | Select-Object -First 1
+          if (-not $msbuild) {
+            throw 'MSBuild was not found.'
+          }
+          & $msbuild Src\OpenShell.sln /m /t:StartMenu /p:Configuration=Setup /p:Platform=x64 /verbosity:minimal /nologo
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Package Start Menu and record file hashes
+        id: package
+        shell: pwsh
+        run: |
+          $packageName = "OpenShell-StartMenu-x64-$($env:GITHUB_SHA.Substring(0, 12))-attempt$env:GITHUB_RUN_ATTEMPT.zip"
+          $stage = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'start-menu-package')
+          $buildOutput = 'build\bin\Setup64'
+          Copy-Item -LiteralPath "$buildOutput\StartMenu.exe", "$buildOutput\StartMenuDLL.dll" -Destination $stage.FullName
+
+          Copy-Item -LiteralPath 'LICENSE' -Destination $stage.FullName
+
+          # Keep the built-in fallback strings and the US English overrides.
+          $includeSection = $false
+          $sections = foreach ($line in Get-Content -LiteralPath 'Src\StartMenu\StartMenuL10N.ini') {
+            if ($line -match '^\s*\[([^\]]+)\]') {
+              $includeSection = $Matches[1] -in 'default', 'en-US'
+            }
+            if ($includeSection) {
+              $line
+            }
+          }
+          $sections | Set-Content -LiteralPath (Join-Path $stage.FullName 'StartMenuL10N.ini') -Encoding utf8BOM
+
+          $checksums = foreach ($name in 'StartMenu.exe', 'StartMenuDLL.dll', 'StartMenuL10N.ini') {
+            $hash = (Get-FileHash -LiteralPath (Join-Path $stage.FullName $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $name"
+          }
+          $checksums | Set-Content -LiteralPath (Join-Path $stage.FullName 'SHA256SUMS.txt') -Encoding ascii
+
+          Compress-Archive -Path (Join-Path $stage.FullName '*') -DestinationPath $packageName
+          "path=$packageName" >> $env:GITHUB_OUTPUT
+
+      - name: Upload ZIP
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.package.outputs.path }}
+          archive: false
+          if-no-files-found: error
