@@ -291,17 +291,21 @@ static const wchar_t *g_pProgramExtensions[]=
 	L".SCR",
 };
 
-static bool IsPackagedWindowsToolsItem( IShellItem *pItem )
+static bool IsDuplicateWindowsToolsTask( IShellItem *pItem )
 {
-	// Windows Tools can expose packaged app shortcuts without package metadata.
-	CComQIPtr<IShellItem2> pItem2=pItem;
-	CComString appId;
-	return pItem2 && SUCCEEDED(pItem2->GetString(PKEY_AppUserModel_ID,&appId)) && IsPackagedAppId(appId);
+	CComString path;
+	if (FAILED(pItem->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING,&path)) || !path)
+		return false;
+
+	const wchar_t *taskId=PathFindFileName(path);
+	// All Tasks aliases for Task Scheduler and Event Viewer. Match IDs across languages.
+	return _wcsicmp(taskId,L"{C16A18A2-DC4F-4B7D-92F1-14C430AD17DC}")==0 ||
+		_wcsicmp(taskId,L"{45FDB5DF-1457-4A41-A824-7AD9C75767BC}")==0;
 }
 
 bool CSearchManager::AddSearchItem( IShellItem *pItem, const wchar_t *name, int flags, TItemCategory category, SearchRequest &searchRequest )
 {
-	if ((flags&COLLECT_WINDOWS_TOOLS) && IsPackagedWindowsToolsItem(pItem))
+	if ((flags&COLLECT_ALL_TASKS) && IsDuplicateWindowsToolsTask(pItem))
 		return false;
 
 	CAbsolutePidl pidl;
@@ -800,7 +804,7 @@ void CSearchManager::SearchThread( void )
 				{
 					CMenuContainer::RefreshSearch();
 				}
-				// collect items from the control panel, admin tools, and the god mode
+				// Collect Control Panel items and All Tasks links.
 				{
 					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_ControlPanelFolder,&pFolder)))
@@ -810,23 +814,8 @@ void CSearchManager::SearchThread( void )
 				}
 				{
 					CComPtr<IShellItem> pFolder;
-					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_AdminTools,&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
-					if (searchRequest.requestId<m_LastProgramsRequestId)
-						continue;
-				}
-				if (!searchRequest.bNoCommonFolders)
-				{
-					CComPtr<IShellItem> pFolder;
-					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_CommonAdminTools,&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_NOREFRESH|COLLECT_WINDOWS_TOOLS,CATEGORY_SETTING,searchRequest);
-					if (searchRequest.requestId<m_LastProgramsRequestId)
-						continue;
-				}
-				{
-					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(SHCreateItemFromParsingName(L"shell:::{ED7BA470-8E54-465E-825C-99712043E01C}",NULL,IID_IShellItem,(void**)&pFolder)))
-						CollectSearchItems(pFolder,(searchRequest.bSearchKeywords?COLLECT_KEYWORDS:0)|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
+						CollectSearchItems(pFolder,COLLECT_ALL_TASKS|(searchRequest.bSearchKeywords?COLLECT_KEYWORDS:0)|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
