@@ -98,8 +98,9 @@ private:
 		const CItemManager::ItemInfo *pInfo;
 		int rank; // ignore the item if rank<0
 		bool bMetroLink;
+		bool bExtraShortcut;
 
-		SearchItem( void ) { category=CATEGORY_INVALID; pInfo=NULL; rank=0; bMetroLink=false; }
+		SearchItem( void ) { category=CATEGORY_INVALID; pInfo=NULL; rank=0; bMetroLink=bExtraShortcut=false; }
 
 		// 0 - no match, 1 - match name, 2 - match keywords
 		int MatchText( const wchar_t *search, bool bSearchSubWord ) const { return MatchTextInt(search,name,bSearchSubWord)?2:(MatchTextInt(search,keywords,bSearchSubWord)?1:0); }
@@ -137,6 +138,7 @@ private:
 		DWORD searchTime;
 		CString searchText;
 		CString autoCompletePath;
+		CString extraShortcutsPath;
 	};
 
 	// LOCK_DATA
@@ -168,6 +170,7 @@ private:
 		COLLECT_LIBRARY    =0x40, // the folder is a library
 		COLLECT_NOREFRESH  =0x80, // suppress the refresh message
 		COLLECT_WINDOWS_TOOLS=0x100, // skip packaged apps exposed by the Windows Tools virtual folder
+		COLLECT_EXTRA_SHORTCUTS=0x200, // collect filesystem shortcuts from the additional folder
 
 		COLLECT_IS_FOLDER =0x8000
 	};

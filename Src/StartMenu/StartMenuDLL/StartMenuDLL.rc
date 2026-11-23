@@ -922,6 +922,8 @@ BEGIN
     IDS_TASKBAR_TRANS_TIP   "When this is checked, the taskbar will be opaque"
     IDS_SEARCH_PROGRAMS     "Search programs and settings"
     IDS_SEARCH_PROGRAMS_TIP "When this is checked, the search results will include programs and settings"
+    IDS_SEARCH_EXTRA_SHORTCUTS "Additional shortcuts folder"
+    IDS_SEARCH_EXTRA_SHORTCUTS_TIP "Also search this folder and its subfolders for shortcuts. Leave it empty to use the usual program folders."
     IDS_SEARCH_METRO        "Search Metro apps"
     IDS_SEARCH_METRO_TIP    "When this is checked, the search results will include Metro apps"
     IDS_SEARCH_KEYWORDS     "Search for keywords"

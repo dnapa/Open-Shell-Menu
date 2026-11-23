@@ -4387,6 +4387,7 @@ CSetting g_Settings[]={
 	{L"SearchAutoComplete",CSetting::TYPE_BOOL,IDS_SEARCH_AUTO,IDS_SEARCH_AUTO_TIP,1,0,L"SearchBox"},
 	{L"SearchPrograms",CSetting::TYPE_BOOL,IDS_SEARCH_PROGRAMS,IDS_SEARCH_PROGRAMS_TIP,1,0,L"SearchBox"},
 		{L"SearchPath",CSetting::TYPE_BOOL,IDS_SEARCH_PATH,IDS_SEARCH_PATH_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
+		{L"SearchExtraShortcutsPath",CSetting::TYPE_DIRECTORY,IDS_SEARCH_EXTRA_SHORTCUTS,IDS_SEARCH_EXTRA_SHORTCUTS_TIP,L"",0,L"#SearchPrograms",L"SearchPrograms"},
 		{L"SearchMetroApps",CSetting::TYPE_BOOL,IDS_SEARCH_METRO,IDS_SEARCH_METRO_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
 		{L"SearchMetroSettings",CSetting::TYPE_BOOL,IDS_SEARCH_METROS,IDS_SEARCH_METROS_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
 		{L"SearchKeywords",CSetting::TYPE_BOOL,IDS_SEARCH_KEYWORDS,IDS_SEARCH_KEYWORDS_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},

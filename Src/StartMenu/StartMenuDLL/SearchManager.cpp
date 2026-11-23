@@ -118,6 +118,7 @@ void CSearchManager::BeginSearch( const CString &searchText )
 		m_SearchRequest.requestId=++m_LastRequestId;
 		m_SearchRequest.bSearchPrograms=GetSettingBool(L"SearchPrograms");
 		m_SearchRequest.bSearchPath=GetSettingBool(L"SearchPath");
+		m_SearchRequest.extraShortcutsPath=GetSettingString(L"SearchExtraShortcutsPath");
 		m_SearchRequest.bSearchMetroApps=GetSettingBool(L"SearchMetroApps");
 		m_SearchRequest.bSearchMetroSettings=GetSettingBool(L"SearchMetroSettings");
 		m_SearchRequest.bSearchSettings=m_SearchRequest.bSearchPrograms; //GetSettingBool(L"SearchSettings");
@@ -202,6 +203,8 @@ unsigned int CSearchManager::CalcItemsHash( const std::vector<SearchItem> &items
 		hash=CalcFNVHash(&it->pInfo,sizeof(void*),hash);
 		hash=CalcFNVHash(&it->rank,sizeof(int),hash);
 		hash=CalcFNVHash(&it->bMetroLink,sizeof(bool),hash);
+		hash=CalcFNVHash(&it->bExtraShortcut,sizeof(bool),hash);
+		hash=CalcFNVHash(it->shortcutAppId,hash);
 	}
 	return hash;
 }
@@ -307,36 +310,42 @@ bool CSearchManager::AddSearchItem( IShellItem *pItem, const wchar_t *name, int 
 
 	SearchItem item;
 	item.category=CATEGORY_INVALID;
+	item.bExtraShortcut=(flags&COLLECT_EXTRA_SHORTCUTS)!=0;
 	bool bProgramShortcut=false;
 	item.pInfo=g_ItemManager.GetItemInfo(pItem,pidl,CItemManager::INFO_LINK|((flags&COLLECT_METRO)?CItemManager::INFO_METRO:0));
 	{
 		CItemManager::RWLock lock(&g_ItemManager,false,CItemManager::RWLOCK_ITEMS);
+		const bool bFileShortcut=category==CATEGORY_PROGRAM && _wcsicmp(PathFindExtension(item.pInfo->GetPath()),L".lnk")==0;
+		if (item.bExtraShortcut && !bFileShortcut)
+			return false;
 		item.bMetroLink=item.pInfo->IsMetroLink();
 		if ((flags&COLLECT_ONLY_METRO) && !item.bMetroLink)
 			return false;
-		if (item.bMetroLink && (!searchRequest.bSearchMetroApps || _wcsicmp(item.pInfo->GetAppid(),DESKTOP_APP_ID)==0))
+		if (item.bMetroLink && ((!searchRequest.bSearchMetroApps && !item.bExtraShortcut) || _wcsicmp(item.pInfo->GetAppid(),DESKTOP_APP_ID)==0))
 			return false;
 		item.category=category;
-		if (item.bMetroLink)
+		if (item.bMetroLink && !item.bExtraShortcut)
 		{
 			item.name=item.pInfo->GetMetroName();
 			StringUpper(item.name);
 		}
 		else
 			item.name=name;
-		bProgramShortcut=category==CATEGORY_PROGRAM && searchRequest.bSearchMetroApps && GetWinVersion()>=WIN_VER_WIN10 &&
-			_wcsicmp(PathFindExtension(item.pInfo->GetPath()),L".lnk")==0;
+		bProgramShortcut=bFileShortcut && GetWinVersion()>=WIN_VER_WIN10 &&
+			(searchRequest.bSearchMetroApps || !searchRequest.extraShortcutsPath.IsEmpty());
 		if (bProgramShortcut)
 			item.shortcutAppId=item.pInfo->GetAppid();
 	}
 	if (bProgramShortcut)
 	{
-		// Some shortcuts expose the app ID only as their target parsing name.
-		if (item.shortcutAppId.IsEmpty())
+		// Some shortcuts expose the packaged app ID only as their target parsing name.
+		if (item.shortcutAppId.IsEmpty() || (!searchRequest.extraShortcutsPath.IsEmpty() &&
+			!IsPackagedAppId(item.shortcutAppId)))
 		{
 			CComQIPtr<IShellItem2> pItem2=pItem;
 			CComString target;
-			if (pItem2 && SUCCEEDED(pItem2->GetString(PKEY_Link_TargetParsingPath,&target)) && target)
+			if (pItem2 && SUCCEEDED(pItem2->GetString(PKEY_Link_TargetParsingPath,&target)) && target &&
+				(item.shortcutAppId.IsEmpty() || IsPackagedAppId(target)))
 				item.shortcutAppId=target;
 		}
 		StringUpper(item.shortcutAppId);
@@ -480,6 +489,8 @@ void CSearchManager::CollectSearchItems( IShellItem *pFolder, int flags, TItemCa
 						break;
 				}
 			}
+			if ((flags&COLLECT_EXTRA_SHORTCUTS) && !(itemFlags&SFGAO_LINK))
+				continue;
 			if ((flags&COLLECT_FOLDERS) || !(itemFlags&SFGAO_FOLDER))
 			{
 				CComString pName;
@@ -683,6 +694,25 @@ void CSearchManager::SearchThread( void )
 					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_Games,&pFolder)))
 						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest);
+					if (searchRequest.requestId<m_LastProgramsRequestId)
+						continue;
+				}
+
+				// Collect user shortcuts from the optional folder after the normal Start Menu.
+				if (!searchRequest.extraShortcutsPath.IsEmpty())
+				{
+					wchar_t path[_MAX_PATH];
+					const DWORD length=ExpandEnvironmentStrings(searchRequest.extraShortcutsPath,path,_countof(path));
+					if (length && length<=_countof(path) && !PathIsRelative(path))
+					{
+						const DWORD attributes=GetFileAttributes(path);
+						if (attributes!=INVALID_FILE_ATTRIBUTES && (attributes&FILE_ATTRIBUTE_DIRECTORY) && !(attributes&FILE_ATTRIBUTE_HIDDEN))
+						{
+							CComPtr<IShellItem> pFolder;
+							if (SUCCEEDED(SHCreateItemFromParsingName(path,NULL,IID_PPV_ARGS(&pFolder))))
+								CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_FOLDERS|COLLECT_METRO|COLLECT_NOREFRESH|COLLECT_EXTRA_SHORTCUTS,CATEGORY_PROGRAM,searchRequest);
+						}
+					}
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
@@ -1424,11 +1454,23 @@ void CSearchManager::GetSearchResults( SearchResults &results )
 		{
 			std::vector<SearchItem> &programs=m_bProgramsFound?m_ProgramItems:m_ProgramItemsOld;
 			std::sort(programs.begin(),programs.end());
+			std::set<CString> matchingShortcutApps;
+			if (std::any_of(programs.begin(),programs.end(),[](const SearchItem &item) { return item.bExtraShortcut; }))
+			{
+				// If both shortcuts match the query, prefer the one in the ordinary Programs sources.
+				for (const SearchItem &item : programs)
+					if (!item.bExtraShortcut && item.category==CATEGORY_PROGRAM && !item.shortcutAppId.IsEmpty() &&
+						item.MatchText(m_SearchText,bSearchSubWord))
+						matchingShortcutApps.insert(item.shortcutAppId);
+			}
 			std::vector<const SearchItem*> foundItems;
 			for (std::vector<SearchItem>::const_iterator it=programs.begin();it!=programs.end();++it)
 			{
 				if (it->category==CATEGORY_PROGRAM && it->MatchText(m_SearchText,bSearchSubWord))
 				{
+					const bool bExtraPackagedShortcut=it->bExtraShortcut && IsPackagedAppId(it->shortcutAppId);
+					if (bExtraPackagedShortcut && matchingShortcutApps.find(it->shortcutAppId)!=matchingShortcutApps.end())
+						continue;
 					bool bDuplicate=false;
 					bool bAppResolved=false;
 					for (std::vector<const SearchItem*>::const_iterator it2=foundItems.begin();it2!=foundItems.end();++it2)
@@ -1453,6 +1495,8 @@ void CSearchManager::GetSearchResults( SearchResults &results )
 					{
 						results.programs.push_back(it->pInfo);
 						foundItems.push_back(&*it);
+						if (bExtraPackagedShortcut)
+							matchingShortcutApps.insert(it->shortcutAppId);
 					}
 				}
 			}
