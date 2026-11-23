@@ -1628,7 +1628,7 @@ static bool IsVisibleProgramsShortcut( const CString &path, const wchar_t *userP
 		if (root[len-1]==L'\\')
 			len--;
 		if (path.GetLength()>len && path[len]==L'\\' && _wcsnicmp(path,root,len)==0)
-			rootLength=rootLength?std::min(rootLength,len):len;
+			rootLength=rootLength?min(rootLength,len):len;
 	}
 	if (!rootLength)
 		return false;
