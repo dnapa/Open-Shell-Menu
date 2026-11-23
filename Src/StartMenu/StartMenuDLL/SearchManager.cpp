@@ -603,6 +603,25 @@ bool CSearchManager::SearchScope::ParseSearchConnector( const wchar_t *fname )
 	return false;
 }
 
+CString CSearchManager::ResolveExtraShortcutsPath( const CString &setting )
+{
+	if (setting.IsEmpty())
+		return CString();
+
+	wchar_t expanded[_MAX_PATH],path[_MAX_PATH];
+	const DWORD length=ExpandEnvironmentStrings(setting,expanded,_countof(expanded));
+	if (!length || length>_countof(expanded) || PathIsRelative(expanded))
+		return CString();
+	const DWORD fullLength=GetFullPathName(expanded,_countof(path),path,NULL);
+	if (!fullLength || fullLength>=_countof(path))
+		return CString();
+	PathRemoveBackslash(path);
+	const DWORD attributes=GetFileAttributes(path);
+	if (attributes==INVALID_FILE_ATTRIBUTES || !(attributes&FILE_ATTRIBUTE_DIRECTORY) || (attributes&FILE_ATTRIBUTE_HIDDEN))
+		return CString();
+	return CString(path);
+}
+
 void CSearchManager::SearchThread( void )
 {
 	HANDLE events[2]={m_SearchEvent,m_ExitEvent};
@@ -701,18 +720,10 @@ void CSearchManager::SearchThread( void )
 				// Collect user shortcuts from the optional folder after the normal Start Menu.
 				if (!searchRequest.extraShortcutsPath.IsEmpty())
 				{
-					wchar_t path[_MAX_PATH];
-					const DWORD length=ExpandEnvironmentStrings(searchRequest.extraShortcutsPath,path,_countof(path));
-					if (length && length<=_countof(path) && !PathIsRelative(path))
-					{
-						const DWORD attributes=GetFileAttributes(path);
-						if (attributes!=INVALID_FILE_ATTRIBUTES && (attributes&FILE_ATTRIBUTE_DIRECTORY) && !(attributes&FILE_ATTRIBUTE_HIDDEN))
-						{
-							CComPtr<IShellItem> pFolder;
-							if (SUCCEEDED(SHCreateItemFromParsingName(path,NULL,IID_PPV_ARGS(&pFolder))))
-								CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_FOLDERS|COLLECT_METRO|COLLECT_NOREFRESH|COLLECT_EXTRA_SHORTCUTS,CATEGORY_PROGRAM,searchRequest);
-						}
-					}
+					const CString path=ResolveExtraShortcutsPath(searchRequest.extraShortcutsPath);
+					CComPtr<IShellItem> pFolder;
+					if (!path.IsEmpty() && SUCCEEDED(SHCreateItemFromParsingName(path,NULL,IID_PPV_ARGS(&pFolder))))
+						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_FOLDERS|COLLECT_METRO|COLLECT_NOREFRESH|COLLECT_EXTRA_SHORTCUTS,CATEGORY_PROGRAM,searchRequest);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}

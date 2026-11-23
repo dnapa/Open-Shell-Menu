@@ -68,6 +68,7 @@ public:
 		std::list<SearchCategory> indexed;
 	};
 
+	static CString ResolveExtraShortcutsPath( const CString &setting );
 	void BeginSearch( const CString &searchText );
 	void GetSearchResults( SearchResults &results );
 	void AddItemRank( unsigned int hash );
