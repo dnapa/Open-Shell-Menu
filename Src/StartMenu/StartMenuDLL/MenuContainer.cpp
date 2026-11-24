@@ -6551,6 +6551,46 @@ LRESULT CMenuContainer::OnMouseWheel( UINT uMsg, WPARAM wParam, LPARAM lParam, B
 	return 0;
 }
 
+static bool GetAllTasksComment( IShellItem *pItem, CComString &comment )
+{
+	CComQIPtr<IShellItem2> pItem2(pItem);
+	if (pItem2 && SUCCEEDED(pItem2->GetString(PKEY_Comment,&comment)) && comment && *(const wchar_t*)comment)
+		return true;
+
+	// Use the description of the verified Control Panel counterpart for the Device Manager task.
+	CComString path;
+	if (FAILED(pItem->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING,&path)) || !path ||
+		_wcsicmp(PathFindFileName(path),L"{C5361E07-6AA3-4453-81BC-93E8F85EABED}")!=0)
+		return false;
+
+	CComPtr<IShellItem2> target;
+	if (FAILED(SHCreateItemFromParsingName(L"::{26EE0668-A00A-44D7-9371-BEB064C98683}\\0\\::{74246BFC-4C96-11D0-ABEF-0020AF6B0B7A}",NULL,IID_PPV_ARGS(&target))))
+		return false;
+
+	comment.Clear();
+	return SUCCEEDED(target->GetString(PKEY_Comment,&comment)) && comment && *(const wchar_t*)comment;
+}
+
+static bool IsRedundantAllTasksTip( IShellItem *pItem, const wchar_t *tip, const CString &name )
+{
+	CComQIPtr<IShellItem2> pItem2(pItem);
+	CComString application;
+	if (pItem2)
+		pItem2->GetString(PKEY_ApplicationName,&application);
+
+	const CString text(tip);
+	int pos=0;
+	while (pos>=0)
+	{
+		CString line=text.Tokenize(L"\r\n",pos);
+		line.Trim();
+		if (!line.IsEmpty() && line.CompareNoCase(name)!=0 &&
+			(!application || line.CompareNoCase(application)!=0))
+			return false;
+	}
+	return true;
+}
+
 bool CMenuContainer::GetDescription( int index, wchar_t *text, int size )
 {
 	if (index<0 || index>=(int)m_Items.size())
@@ -6716,14 +6756,28 @@ bool CMenuContainer::GetDescription( int index, wchar_t *text, int size )
 		if (FAILED(SHCreateItemFromIDList(item.pItem1,IID_IShellItem,(void**)&pItem)))
 			return bLabel;
 
-		CComPtr<IQueryInfo> pQueryInfo;
-		if (FAILED(pItem->BindToHandler(NULL,BHID_SFUIObject,IID_IQueryInfo,(void**)&pQueryInfo)))
-			return bLabel;
+		const bool bAllTasks=item.id==MENU_NO && item.categoryHash==CSearchManager::CATEGORY_ALL_TASKS;
+		if (bAllTasks && item.bAllTasksNameClipped)
+		{
+			const int len=Strcpy(text,size,item.name);
+			bLabel=len>0;
+			text+=len;
+			size-=len;
+		}
 
 		CComString pTip;
-		HRESULT hr=pQueryInfo->GetInfoTip(QITIPF_DEFAULT,&pTip);
-		if (FAILED(hr) || !pTip)
-			return bLabel;
+		if (!bAllTasks || !GetAllTasksComment(pItem,pTip))
+		{
+			CComPtr<IQueryInfo> pQueryInfo;
+			if (FAILED(pItem->BindToHandler(NULL,BHID_SFUIObject,IID_IQueryInfo,(void**)&pQueryInfo)))
+				return bLabel;
+
+			pTip.Clear();
+			if (FAILED(pQueryInfo->GetInfoTip(QITIPF_DEFAULT,&pTip)) || !pTip)
+				return bLabel;
+			if (bAllTasks && IsRedundantAllTasksTip(pItem,pTip,item.name))
+				return bLabel;
+		}
 
 		if (bLabel)
 			Sprintf(text,size,L"\r\n%s",(const wchar_t*)pTip);

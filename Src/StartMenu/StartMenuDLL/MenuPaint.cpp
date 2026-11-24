@@ -1779,7 +1779,7 @@ void CMenuContainer::DrawBackground( HDC hdc, const RECT &drawRect )
 		}
 
 		if (index>=(int)m_Items.size()) break;
-		const MenuItem &item=m_Items[index];
+		MenuItem &item=m_Items[index];
 
 		RECT itemRect=item.itemRect;
 		// ignore offscreen items
@@ -2361,6 +2361,12 @@ void CMenuContainer::DrawBackground( HDC hdc, const RECT &drawRect )
 		}
 		if (!(flags&DT_WORDBREAK))
 			flags|=DT_VCENTER|DT_SINGLELINE;
+		if (item.id==MENU_NO && item.categoryHash==CSearchManager::CATEGORY_ALL_TASKS)
+		{
+			RECT measured={0,0,rc.right-rc.left,0};
+			DrawText(hdc,name,name.GetLength(),&measured,(flags&(DT_NOPREFIX|DT_SINGLELINE|DT_WORDBREAK))|DT_CALCRECT);
+			item.bAllTasksNameClipped=(measured.right>rc.right-rc.left || measured.bottom>rc.bottom-rc.top);
+		}
 
 		if (s_Theme)
 		{

@@ -453,7 +453,7 @@ private:
 			drawType=MenuSkin::COLUMN1_ITEM;
 			column=row=0;
 			memset(&itemRect,0,sizeof(itemRect));
-			bFolder=bLink=bPrograms=bAlignBottom=bBreak=bInline=bInlineFirst=bInlineLast=bSplit=bHasJumpList=bMetroLink=bMetroApp=bBlankSeparator=bNew=bStartScreen=bCustomAccelerator=false;
+			bFolder=bLink=bPrograms=bAlignBottom=bBreak=bInline=bInlineFirst=bInlineLast=bSplit=bHasJumpList=bMetroLink=bMetroApp=bBlankSeparator=bNew=bStartScreen=bCustomAccelerator=bAllTasksNameClipped=false;
 			priority=0;
 			pItem1=pItem2=NULL;
 			mfuHash=0;
@@ -491,6 +491,7 @@ private:
 		bool bNew:1; // this is a highlighted new item
 		bool bStartScreen:1; // this is the start screen shortcut item
 		bool bCustomAccelerator:1; // the accelerator is specified explicitly
+		bool bAllTasksNameClipped:1; // show the full name if the search row ellipsizes it
 		char priority; // used for sorting of the All Programs menu (0 for Start Menu, 1 for the separator, 2 for the Programs)
 		char drive;
 		wchar_t accelerator; // accelerator character, 0 if none
