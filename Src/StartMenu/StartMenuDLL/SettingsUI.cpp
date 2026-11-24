@@ -4390,6 +4390,7 @@ CSetting g_Settings[]={
 		{L"SearchExtraShortcutsPath",CSetting::TYPE_DIRECTORY,IDS_SEARCH_EXTRA_SHORTCUTS,IDS_SEARCH_EXTRA_SHORTCUTS_TIP,L"",0,L"#SearchPrograms",L"SearchPrograms"},
 		{L"SearchMetroApps",CSetting::TYPE_BOOL,IDS_SEARCH_METRO,IDS_SEARCH_METRO_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
 		{L"SearchControlPanel",CSetting::TYPE_BOOL,IDS_SEARCH_CONTROL_PANEL,IDS_SEARCH_CONTROL_PANEL_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
+		{L"SearchAllTasks",CSetting::TYPE_BOOL,IDS_SEARCH_ALL_TASKS,IDS_SEARCH_ALL_TASKS_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
 		{L"SearchMetroSettings",CSetting::TYPE_BOOL,IDS_SEARCH_METROS,IDS_SEARCH_METROS_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
 		{L"SearchKeywords",CSetting::TYPE_BOOL,IDS_SEARCH_KEYWORDS,IDS_SEARCH_KEYWORDS_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
 		{L"SearchSubWord",CSetting::TYPE_BOOL,IDS_SUB_WORD,IDS_SUB_WORD_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},

@@ -927,7 +927,9 @@ BEGIN
     IDS_SEARCH_METRO        "Search Metro apps"
     IDS_SEARCH_METRO_TIP    "When this is checked, the search results will include Metro apps"
     IDS_SEARCH_CONTROL_PANEL "Search Control Panel"
-    IDS_SEARCH_CONTROL_PANEL_TIP "Include Control Panel items and All Tasks links in search results."
+    IDS_SEARCH_CONTROL_PANEL_TIP "Include Control Panel items in search results."
+    IDS_SEARCH_ALL_TASKS    "Search All Tasks"
+    IDS_SEARCH_ALL_TASKS_TIP "Include All Tasks links in search results."
     IDS_SEARCH_KEYWORDS     "Search for keywords"
 END
 
