@@ -926,6 +926,8 @@ BEGIN
     IDS_SEARCH_EXTRA_SHORTCUTS_TIP "Also search this folder and its subfolders for shortcuts. Leave it empty to use the usual program folders."
     IDS_SEARCH_METRO        "Search Metro apps"
     IDS_SEARCH_METRO_TIP    "When this is checked, the search results will include Metro apps"
+    IDS_SEARCH_CONTROL_PANEL "Search Control Panel"
+    IDS_SEARCH_CONTROL_PANEL_TIP "Include Control Panel items and All Tasks links in search results."
     IDS_SEARCH_KEYWORDS     "Search for keywords"
 END
 

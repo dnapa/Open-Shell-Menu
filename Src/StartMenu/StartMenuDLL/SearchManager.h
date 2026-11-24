@@ -127,7 +127,7 @@ private:
 		bool bSearchPath;
 		bool bSearchMetroApps;
 		bool bSearchMetroSettings;
-		bool bSearchSettings;
+		bool bSearchControlPanel;
 		bool bSearchKeywords;
 		bool bSearchFiles;
 		bool bSearchMetadata;

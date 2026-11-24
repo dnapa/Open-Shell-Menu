@@ -121,7 +121,7 @@ void CSearchManager::BeginSearch( const CString &searchText )
 		m_SearchRequest.extraShortcutsPath=GetSettingString(L"SearchExtraShortcutsPath");
 		m_SearchRequest.bSearchMetroApps=GetSettingBool(L"SearchMetroApps");
 		m_SearchRequest.bSearchMetroSettings=GetSettingBool(L"SearchMetroSettings");
-		m_SearchRequest.bSearchSettings=m_SearchRequest.bSearchPrograms; //GetSettingBool(L"SearchSettings");
+		m_SearchRequest.bSearchControlPanel=m_SearchRequest.bSearchPrograms && GetSettingBool(L"SearchControlPanel");
 		m_SearchRequest.bSearchKeywords=GetSettingBool(L"SearchKeywords");
 		m_SearchRequest.bSearchFiles=GetSettingBool(L"SearchFiles");
 		m_SearchRequest.bSearchMetadata=GetSettingBool(L"SearchContents");
@@ -783,26 +783,30 @@ void CSearchManager::SearchThread( void )
 				searchRequest.searchTime=GetTickCount();
 			}
 
-			if (m_SettingsItems.empty() && searchRequest.bSearchSettings)
+			if (m_SettingsItems.empty() && searchRequest.bSearchPrograms &&
+				(searchRequest.bSearchControlPanel || searchRequest.bSearchMetroSettings))
 			{
 				if (!m_SettingsItemsOld.empty())
 				{
 					CMenuContainer::RefreshSearch();
 				}
-				// Collect Control Panel items and All Tasks links.
+				if (searchRequest.bSearchControlPanel)
 				{
-					CComPtr<IShellItem> pFolder;
-					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_ControlPanelFolder,&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_FOLDERS|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
-					if (searchRequest.requestId<m_LastProgramsRequestId)
-						continue;
-				}
-				{
-					CComPtr<IShellItem> pFolder;
-					if (SUCCEEDED(SHCreateItemFromParsingName(L"shell:::{ED7BA470-8E54-465E-825C-99712043E01C}",NULL,IID_IShellItem,(void**)&pFolder)))
-						CollectSearchItems(pFolder,(searchRequest.bSearchKeywords?COLLECT_KEYWORDS:0)|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
-					if (searchRequest.requestId<m_LastProgramsRequestId)
-						continue;
+					// Collect Control Panel items and All Tasks links.
+					{
+						CComPtr<IShellItem> pFolder;
+						if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_ControlPanelFolder,&pFolder)))
+							CollectSearchItems(pFolder,COLLECT_FOLDERS|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
+						if (searchRequest.requestId<m_LastProgramsRequestId)
+							continue;
+					}
+					{
+						CComPtr<IShellItem> pFolder;
+						if (SUCCEEDED(SHCreateItemFromParsingName(L"shell:::{ED7BA470-8E54-465E-825C-99712043E01C}",NULL,IID_IShellItem,(void**)&pFolder)))
+							CollectSearchItems(pFolder,(searchRequest.bSearchKeywords?COLLECT_KEYWORDS:0)|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
+						if (searchRequest.requestId<m_LastProgramsRequestId)
+							continue;
+					}
 				}
 				if (searchRequest.bSearchMetroSettings)
 				{
@@ -1499,7 +1503,7 @@ void CSearchManager::GetSearchResults( SearchResults &results )
 			{
 				if (it->MatchText(m_SearchText, bSearchSubWord))
 				{
-					if (it->category==CATEGORY_SETTING)
+					if (it->category==CATEGORY_SETTING && m_SearchRequest.bSearchControlPanel)
 						results.settings.push_back(it->pInfo);
 					if (it->category==CATEGORY_METROSETTING)
 						results.metrosettings.push_back(it->pInfo);
