@@ -6554,21 +6554,7 @@ LRESULT CMenuContainer::OnMouseWheel( UINT uMsg, WPARAM wParam, LPARAM lParam, B
 static bool GetAllTasksComment( IShellItem *pItem, CComString &comment )
 {
 	CComQIPtr<IShellItem2> pItem2(pItem);
-	if (pItem2 && SUCCEEDED(pItem2->GetString(PKEY_Comment,&comment)) && comment && *(const wchar_t*)comment)
-		return true;
-
-	// Use the description of the verified Control Panel counterpart for the Device Manager task.
-	CComString path;
-	if (FAILED(pItem->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING,&path)) || !path ||
-		_wcsicmp(PathFindFileName(path),L"{C5361E07-6AA3-4453-81BC-93E8F85EABED}")!=0)
-		return false;
-
-	CComPtr<IShellItem2> target;
-	if (FAILED(SHCreateItemFromParsingName(L"::{26EE0668-A00A-44D7-9371-BEB064C98683}\\0\\::{74246BFC-4C96-11D0-ABEF-0020AF6B0B7A}",NULL,IID_PPV_ARGS(&target))))
-		return false;
-
-	comment.Clear();
-	return SUCCEEDED(target->GetString(PKEY_Comment,&comment)) && comment && *(const wchar_t*)comment;
+	return pItem2 && SUCCEEDED(pItem2->GetString(PKEY_Comment,&comment)) && comment && *(const wchar_t*)comment;
 }
 
 static bool IsRedundantAllTasksTip( IShellItem *pItem, const wchar_t *tip, const CString &name )
