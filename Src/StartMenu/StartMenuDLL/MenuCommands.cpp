@@ -2102,7 +2102,7 @@ void CMenuContainer::ActivateItem( int index, TActivateType type, const POINT *p
 			if (pItemPidl1 && (cat<=CSearchManager::CATEGORY_FILE || cat==CSearchManager::CATEGORY_AUTOCOMPLETE))
 			{
 				bool bExplore=GetSettingBool(L"EnableExplorer");
-				bool bPin=!s_PinFolder.IsEmpty() && (cat==CSearchManager::CATEGORY_SETTING || cat==CSearchManager::CATEGORY_METROSETTING);
+				bool bPin=!s_PinFolder.IsEmpty() && (cat==CSearchManager::CATEGORY_SETTING || cat==CSearchManager::CATEGORY_METROSETTING || cat==CSearchManager::CATEGORY_ALL_TASKS);
 				if (bExplore || bPin)
 				{
 					if (n>0)

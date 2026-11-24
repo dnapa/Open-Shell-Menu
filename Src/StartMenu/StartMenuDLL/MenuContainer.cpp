@@ -2715,7 +2715,8 @@ bool CMenuContainer::InitSearchItems( void )
 	unsigned int runCategoryHash=0;
 	CString runCommand;
 	CComString runExe;
-	if (!bAutoComlpete && !s_bNoRun && s_SearchResults.programs.empty() && s_SearchResults.settings.empty() && s_SearchResults.metrosettings.empty())
+	if (!bAutoComlpete && !s_bNoRun && s_SearchResults.programs.empty() && s_SearchResults.metrosettings.empty() &&
+		s_SearchResults.allTasks.empty() && s_SearchResults.settings.empty())
 	{
 		if (s_bWin7Style)
 			m_SearchBox.GetWindowText(runCommand);
@@ -2736,6 +2737,34 @@ bool CMenuContainer::InitSearchItems( void )
 		if (runCategoryHash)
 			s_SearchResults.programs.push_back(NULL);
 	}
+	struct ResultGroup
+	{
+		unsigned int categoryHash;
+		const wchar_t *name;
+		const std::vector<const CItemManager::ItemInfo*> *items;
+		const std::vector<CSearchManager::SearchCategory::Item> *indexedItems;
+
+		int GetCount( void ) const { return (int)(items?items->size():indexedItems->size()); }
+	};
+	std::vector<ResultGroup> groups=
+	{
+		{CSearchManager::CATEGORY_PROGRAM,FindTranslation(L"Search.CategoryPrograms",L"Programs"),&s_SearchResults.programs,NULL},
+		{CSearchManager::CATEGORY_METROSETTING,FindTranslation(L"Search.CategoryPCSettings",L"Settings"),&s_SearchResults.metrosettings,NULL},
+		{CSearchManager::CATEGORY_ALL_TASKS,FindTranslation(L"Search.CategoryAllTasks",L"All Tasks"),&s_SearchResults.allTasks,NULL},
+		{CSearchManager::CATEGORY_SETTING,FindTranslation(L"Search.CategorySettings",L"Control Panel"),&s_SearchResults.settings,NULL},
+	};
+	for (const auto &category : s_SearchResults.indexed)
+	{
+		if (category.categoryHash==CSearchManager::CATEGORY_METROSETTING)
+		{
+			// The indexed Settings fallback belongs in the same place as direct Settings results.
+			if (s_SearchResults.metrosettings.empty())
+				groups[1]={category.categoryHash,category.name,NULL,&category.items};
+		}
+		else
+			groups.push_back({category.categoryHash,category.name,NULL,&category.items});
+	}
+
 	std::vector<SearchItem> items;
 	std::vector<int> counts;
 	int sepHeight=0, itemHeight=0, maxHeight=0, reservedHeight=0;
@@ -2766,31 +2795,14 @@ bool CMenuContainer::InitSearchItems( void )
 	{
 		// calculate the allowed counts per category
 		int selectedCount=0;
-		if (!s_SearchResults.programs.empty())
+		for (const ResultGroup &group : groups)
 		{
-			counts.push_back((int)s_SearchResults.programs.size());
-			if (m_SearchCategoryHash==CSearchManager::CATEGORY_PROGRAM)
-				selectedCount=(int)s_SearchResults.programs.size();
-		}
-		if (!s_SearchResults.metrosettings.empty())
-		{
-			counts.push_back((int)s_SearchResults.metrosettings.size());
-			if (m_SearchCategoryHash==CSearchManager::CATEGORY_METROSETTING)
-				selectedCount=(int)s_SearchResults.metrosettings.size();
-		}
-		if (!s_SearchResults.settings.empty())
-		{
-			counts.push_back((int)s_SearchResults.settings.size());
-			if (m_SearchCategoryHash==CSearchManager::CATEGORY_SETTING)
-				selectedCount=(int)s_SearchResults.settings.size();
-		}
-		for (std::list<CSearchManager::SearchCategory>::const_iterator it=s_SearchResults.indexed.begin();it!=s_SearchResults.indexed.end();++it)
-		{
-			if (!it->items.empty())
+			const int count=group.GetCount();
+			if (count>0)
 			{
-				counts.push_back((int)it->items.size());
-				if (m_SearchCategoryHash==it->categoryHash)
-					selectedCount=(int)it->items.size();
+				counts.push_back(count);
+				if (m_SearchCategoryHash==group.categoryHash)
+					selectedCount=count;
 			}
 		}
 
@@ -2825,19 +2837,13 @@ bool CMenuContainer::InitSearchItems( void )
 	}
 
 	// add categories
-	std::list<CSearchManager::SearchCategory>::const_iterator it=s_SearchResults.indexed.begin();
-	for (size_t idx=0;idx<s_SearchResults.indexed.size()+3;idx++)
+	for (const ResultGroup &group : groups)
 	{
+		const int originalCount=group.GetCount();
+		if (originalCount==0)
+			continue;
 		items.clear();
-		unsigned int categoryHash;
-		if (idx==0)
-			categoryHash=CSearchManager::CATEGORY_PROGRAM;
-		else if (idx==1)
-			categoryHash=CSearchManager::CATEGORY_METROSETTING;
-		else if (idx==2)
-			categoryHash=CSearchManager::CATEGORY_SETTING;
-		else
-			categoryHash=it->categoryHash;
+		const unsigned int categoryHash=group.categoryHash;
 
 		int count=0;
 		if (s_bWin7Style)
@@ -2852,62 +2858,29 @@ bool CMenuContainer::InitSearchItems( void )
 			count=GetSettingInt(categoryHash==m_SearchCategoryHash?L"SearchResultsMax":L"SearchResults");
 		}
 		if (count<=0)
-		{
-			if (idx>=3) ++it;
 			continue;
-		}
-
-		const wchar_t *name;
-		int originalCount=0;
-		if (idx==0)
+		if (count>originalCount)
+			count=originalCount;
+		items.reserve(count);
+		if (group.items)
 		{
-			originalCount=(int)s_SearchResults.programs.size();
-			if (count>originalCount)
-				count=originalCount;
-			items.reserve(count);
-			for (std::vector<const CItemManager::ItemInfo*>::const_iterator it=s_SearchResults.programs.begin();it!=s_SearchResults.programs.end() && (int)items.size()<count;++it)
-				items.push_back(SearchItem(*it));
-			name=FindTranslation(L"Search.CategoryPrograms",L"Programs");
-		}
-		else if (idx==1)
-		{
-			originalCount=(int)s_SearchResults.metrosettings.size();
-			if (count>originalCount)
-				count=originalCount;
-			items.reserve(count);
-			for (std::vector<const CItemManager::ItemInfo*>::const_iterator it=s_SearchResults.metrosettings.begin();it!=s_SearchResults.metrosettings.end() && (int)items.size()<count;++it)
-				items.push_back(SearchItem(*it));
-			name=FindTranslation(L"Search.CategoryPCSettings", L"Settings");
-		}
-		else if (idx==2)
-		{
-			originalCount=(int)s_SearchResults.settings.size();
-			if (count>originalCount)
-				count=originalCount;
-			items.reserve(count);
-			for (std::vector<const CItemManager::ItemInfo*>::const_iterator it=s_SearchResults.settings.begin();it!=s_SearchResults.settings.end() && (int)items.size()<count;++it)
-				items.push_back(SearchItem(*it));
-			name=FindTranslation(L"Search.CategorySettings",L"Control Panel");
+			for (int i=0;i<count;i++)
+				items.push_back(SearchItem((*group.items)[i]));
 		}
 		else
 		{
-			originalCount=(int)it->items.size();
-			if (count>originalCount)
-				count=originalCount;
-			items.reserve(count);
 			for (int i=0;i<count;i++)
 			{
-				PIDLIST_ABSOLUTE pidl=it->items[i].pidl;
+				const auto &entry=(*group.indexedItems)[i];
+				PIDLIST_ABSOLUTE pidl=entry.pidl;
 				CComPtr<IShellItem> pItem;
 				if (SUCCEEDED(SHCreateItemFromIDList(pidl,IID_IShellItem,(void**)&pItem)))
-					items.push_back(SearchItem(it->items[i].name,g_ItemManager.GetItemInfo(pItem,pidl,0)));
+					items.push_back(SearchItem(entry.name,g_ItemManager.GetItemInfo(pItem,pidl,0)));
 			}
-			name=it->name;
-			++it;
 		}
 		if (items.empty())
 			continue;
-		if (idx==0 && runCategoryHash)
+		if (categoryHash==CSearchManager::CATEGORY_PROGRAM && runCategoryHash)
 		{
 			MenuItem item1(MENU_SEARCH_CATEGORY);
 			item1.categoryHash=runCategoryHash;
@@ -2932,7 +2905,7 @@ bool CMenuContainer::InitSearchItems( void )
 		}
 		else
 		{
-			count=AddSearchItems(items,name,categoryHash,originalCount);
+			count=AddSearchItems(items,group.name,categoryHash,originalCount);
 		}
 		if (s_bWin7Style && categoryHash!=m_SearchCategoryHash && count>0)
 			maxHeight-=sepHeight+count*itemHeight;

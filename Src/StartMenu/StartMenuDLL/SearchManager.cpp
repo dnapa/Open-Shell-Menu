@@ -204,6 +204,7 @@ unsigned int CSearchManager::CalcItemsHash( const std::vector<SearchItem> &items
 		hash=CalcFNVHash(&it->rank,sizeof(int),hash);
 		hash=CalcFNVHash(&it->bMetroLink,sizeof(bool),hash);
 		hash=CalcFNVHash(&it->bExtraShortcut,sizeof(bool),hash);
+		hash=CalcFNVHash(&it->bAllTasks,sizeof(bool),hash);
 		hash=CalcFNVHash(it->shortcutAppId,hash);
 	}
 	return hash;
@@ -300,6 +301,7 @@ bool CSearchManager::AddSearchItem( IShellItem *pItem, const wchar_t *name, int 
 	SearchItem item;
 	item.category=CATEGORY_INVALID;
 	item.bExtraShortcut=(flags&COLLECT_EXTRA_SHORTCUTS)!=0;
+	item.bAllTasks=(flags&COLLECT_ALL_TASKS)!=0;
 	bool bProgramShortcut=false;
 	item.pInfo=g_ItemManager.GetItemInfo(pItem,pidl,CItemManager::INFO_LINK|((flags&COLLECT_METRO)?CItemManager::INFO_METRO:0));
 	{
@@ -803,7 +805,7 @@ void CSearchManager::SearchThread( void )
 					{
 						CComPtr<IShellItem> pFolder;
 						if (SUCCEEDED(SHCreateItemFromParsingName(L"shell:::{ED7BA470-8E54-465E-825C-99712043E01C}",NULL,IID_IShellItem,(void**)&pFolder)))
-							CollectSearchItems(pFolder,(searchRequest.bSearchKeywords?COLLECT_KEYWORDS:0)|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
+							CollectSearchItems(pFolder,COLLECT_ALL_TASKS|(searchRequest.bSearchKeywords?COLLECT_KEYWORDS:0)|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
 						if (searchRequest.requestId<m_LastProgramsRequestId)
 							continue;
 					}
@@ -1430,6 +1432,7 @@ DWORD CALLBACK CSearchManager::StaticSearchThread( void *param )
 void CSearchManager::GetSearchResults( SearchResults &results )
 {
 	results.programs.clear();
+	results.allTasks.clear();
 	results.settings.clear();
 	results.metrosettings.clear();
 	results.indexed.clear();
@@ -1504,7 +1507,7 @@ void CSearchManager::GetSearchResults( SearchResults &results )
 				if (it->MatchText(m_SearchText, bSearchSubWord))
 				{
 					if (it->category==CATEGORY_SETTING && m_SearchRequest.bSearchControlPanel)
-						results.settings.push_back(it->pInfo);
+						(it->bAllTasks?results.allTasks:results.settings).push_back(it->pInfo);
 					if (it->category==CATEGORY_METROSETTING)
 						results.metrosettings.push_back(it->pInfo);
 				}
@@ -1526,7 +1529,7 @@ void CSearchManager::GetSearchResults( SearchResults &results )
 				results.autocomplete.push_back(it->pInfo);
 		}
 	}
-	results.bResults=(!results.programs.empty() || !results.settings.empty() || !results.metrosettings.empty() || !results.indexed.empty() || !results.autocomplete.empty());
+	results.bResults=(!results.programs.empty() || !results.settings.empty() || !results.allTasks.empty() || !results.metrosettings.empty() || !results.indexed.empty() || !results.autocomplete.empty());
 	results.bSearching=(m_LastCompletedId!=m_LastRequestId);
 }
 

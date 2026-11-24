@@ -24,6 +24,7 @@ public:
 	{
 		CATEGORY_INVALID,
 		CATEGORY_PROGRAM,
+		CATEGORY_ALL_TASKS,
 		CATEGORY_SETTING,
 		CATEGORY_METROSETTING,
 		CATEGORY_FILE,
@@ -62,6 +63,7 @@ public:
 		CString currentString;
 		CString autoCompletePath;
 		std::vector<const CItemManager::ItemInfo*> programs;
+		std::vector<const CItemManager::ItemInfo*> allTasks;
 		std::vector<const CItemManager::ItemInfo*> settings;
 		std::vector<const CItemManager::ItemInfo*> metrosettings;
 		std::vector<const CItemManager::ItemInfo*> autocomplete;
@@ -100,8 +102,9 @@ private:
 		int rank; // ignore the item if rank<0
 		bool bMetroLink;
 		bool bExtraShortcut;
+		bool bAllTasks;
 
-		SearchItem( void ) { category=CATEGORY_INVALID; pInfo=NULL; rank=0; bMetroLink=bExtraShortcut=false; }
+		SearchItem( void ) { category=CATEGORY_INVALID; pInfo=NULL; rank=0; bMetroLink=bExtraShortcut=bAllTasks=false; }
 
 		// 0 - no match, 1 - match name, 2 - match keywords
 		int MatchText( const wchar_t *search, bool bSearchSubWord ) const { return MatchTextInt(search,name,bSearchSubWord)?2:(MatchTextInt(search,keywords,bSearchSubWord)?1:0); }
@@ -170,6 +173,7 @@ private:
 		COLLECT_KEYWORDS   =0x20, // include the keywords
 		COLLECT_LIBRARY    =0x40, // the folder is a library
 		COLLECT_NOREFRESH  =0x80, // suppress the refresh message
+		COLLECT_ALL_TASKS   =0x100, // mark All Tasks results for display
 		COLLECT_EXTRA_SHORTCUTS=0x200, // collect filesystem shortcuts from the additional folder
 
 		COLLECT_IS_FOLDER =0x8000
