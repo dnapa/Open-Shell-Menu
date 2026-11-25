@@ -11,17 +11,6 @@
 
 const int MAX_SEARCH_RESULTS=100; // per category
 
-class CProgramsExclusions
-{
-public:
-	explicit CProgramsExclusions( const CString &setting );
-	bool Matches( IShellItem *pItem ) const;
-	bool Matches( const wchar_t *path ) const;
-
-private:
-	std::vector<CString> m_Paths;
-};
-
 class CSearchManager
 {
 public:
@@ -35,7 +24,6 @@ public:
 	{
 		CATEGORY_INVALID,
 		CATEGORY_PROGRAM,
-		CATEGORY_ALL_TASKS,
 		CATEGORY_SETTING,
 		CATEGORY_METROSETTING,
 		CATEGORY_FILE,
@@ -74,14 +62,12 @@ public:
 		CString currentString;
 		CString autoCompletePath;
 		std::vector<const CItemManager::ItemInfo*> programs;
-		std::vector<const CItemManager::ItemInfo*> allTasks;
 		std::vector<const CItemManager::ItemInfo*> settings;
 		std::vector<const CItemManager::ItemInfo*> metrosettings;
 		std::vector<const CItemManager::ItemInfo*> autocomplete;
 		std::list<SearchCategory> indexed;
 	};
 
-	static CString ResolveExtraShortcutsPath( const CString &setting );
 	void BeginSearch( const CString &searchText );
 	void GetSearchResults( SearchResults &results );
 	void AddItemRank( unsigned int hash );
@@ -108,14 +94,11 @@ private:
 		TItemCategory category;
 		CString name; // uppercase
 		CString keywords; // uppercase
-		CString shortcutAppId; // uppercase AppUserModelID or target parsing name
 		const CItemManager::ItemInfo *pInfo;
 		int rank; // ignore the item if rank<0
 		bool bMetroLink;
-		bool bExtraShortcut;
-		bool bAllTasks;
 
-		SearchItem( void ) { category=CATEGORY_INVALID; pInfo=NULL; rank=0; bMetroLink=bExtraShortcut=bAllTasks=false; }
+		SearchItem( void ) { category=CATEGORY_INVALID; pInfo=NULL; rank=0; bMetroLink=false; }
 
 		// 0 - no match, 1 - match name, 2 - match keywords
 		int MatchText( const wchar_t *search, bool bSearchSubWord ) const { return MatchTextInt(search,name,bSearchSubWord)?2:(MatchTextInt(search,keywords,bSearchSubWord)?1:0); }
@@ -141,8 +124,7 @@ private:
 		bool bSearchPath;
 		bool bSearchMetroApps;
 		bool bSearchMetroSettings;
-		bool bSearchControlPanel;
-		bool bSearchAllTasks;
+		bool bSearchSettings;
 		bool bSearchKeywords;
 		bool bSearchFiles;
 		bool bSearchMetadata;
@@ -154,8 +136,6 @@ private:
 		DWORD searchTime;
 		CString searchText;
 		CString autoCompletePath;
-		CString extraShortcutsPath;
-		CString excludedProgramsPaths;
 	};
 
 	// LOCK_DATA
@@ -186,14 +166,12 @@ private:
 		COLLECT_KEYWORDS   =0x20, // include the keywords
 		COLLECT_LIBRARY    =0x40, // the folder is a library
 		COLLECT_NOREFRESH  =0x80, // suppress the refresh message
-		COLLECT_ALL_TASKS   =0x100, // mark All Tasks results for display
-		COLLECT_EXTRA_SHORTCUTS=0x200, // collect filesystem shortcuts from the additional folder
 
 		COLLECT_IS_FOLDER =0x8000
 	};
 
 	bool AddSearchItem( IShellItem *pItem, const wchar_t *name, int flags, TItemCategory category, SearchRequest &searchRequest );
-	void CollectSearchItems( IShellItem *pFolder, int flags, TItemCategory category, SearchRequest &searchRequest, const CProgramsExclusions *exclusions=NULL );
+	void CollectSearchItems( IShellItem *pFolder, int flags, TItemCategory category, SearchRequest &searchRequest );
 	void CollectIndexItems( IShellItem *pFolder, int flags, TItemCategory category, const wchar_t *groupName );
 
 	enum TLock

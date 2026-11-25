@@ -922,14 +922,8 @@ BEGIN
     IDS_TASKBAR_TRANS_TIP   "When this is checked, the taskbar will be opaque"
     IDS_SEARCH_PROGRAMS     "Search programs and settings"
     IDS_SEARCH_PROGRAMS_TIP "When this is checked, the search results will include programs and settings"
-    IDS_SEARCH_EXTRA_SHORTCUTS "Additional shortcuts folder"
-    IDS_SEARCH_EXTRA_SHORTCUTS_TIP "Also search this folder and its subfolders for shortcuts. Leave it empty to use the usual program folders."
     IDS_SEARCH_METRO        "Search Metro apps"
     IDS_SEARCH_METRO_TIP    "When this is checked, the search results will include Metro apps"
-    IDS_SEARCH_CONTROL_PANEL "Search Control Panel"
-    IDS_SEARCH_CONTROL_PANEL_TIP "Include Control Panel items in search results."
-    IDS_SEARCH_ALL_TASKS    "Search All Tasks"
-    IDS_SEARCH_ALL_TASKS_TIP "Include All Tasks links in search results."
     IDS_SEARCH_KEYWORDS     "Search for keywords"
 END
 
@@ -1205,8 +1199,6 @@ BEGIN
     IDS_COLUMN_COMMAND      "Command"
     IDS_COLUMN_DISPLAY      "Display"
     IDS_HIDE_APPS           "Hide app shortcuts"
-    IDS_EXCLUDED_PROGRAMS_PATHS "Hide Programs folders and shortcuts"
-    IDS_EXCLUDED_PROGRAMS_PATHS_TIP "Separate paths with semicolons. Relative paths are checked in both Windows Programs folders. Full paths can select one folder or shortcut. This only affects Open-Shell."
     IDS_HIDE_APPS_TIP       "When this is checked, the shortcuts to Metro apps that are outside of the dedicated Apps folder will be hidden"
     IDS_HYBRID_SHUTDOWN     "Enable hybrid shutdown"
     IDS_HYBRID_SHUTDOWN_TIP "When this is checked, the shutdown button will perform the faster hybrid shutdown. You can still do a full shutdown by holding down Shift"

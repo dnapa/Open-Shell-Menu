@@ -688,7 +688,6 @@ void CProgramsTree::AddFirstFolder( std::vector<CTreeItem*> &items, IShellItem *
 	CShellItemEnumerator enumerator(pParent);
 	if (!enumerator.IsValid()) return;
 
-	const CProgramsExclusions exclusions(GetSettingString(L"ExcludedProgramsPaths"));
 	CComPtr<IShellItem> pChild;
 	CAbsolutePidl childPidl;
 	while (enumerator.GetNext(pChild,childPidl))
@@ -696,7 +695,7 @@ void CProgramsTree::AddFirstFolder( std::vector<CTreeItem*> &items, IShellItem *
 		SFGAOF itemFlags;
 		if (SUCCEEDED(pChild->GetAttributes(SFGAO_FOLDER|SFGAO_HIDDEN,&itemFlags)))
 		{
-			if ((itemFlags&SFGAO_HIDDEN) || exclusions.Matches(pChild))
+			if (itemFlags&SFGAO_HIDDEN)
 				continue;
 			CTreeItem *pItem=new CTreeItem();
 			pItem->bFolder=(itemFlags&SFGAO_FOLDER)!=0;
@@ -753,7 +752,6 @@ void CProgramsTree::AddSecondFolder( std::vector<CTreeItem*> &items, IShellItem 
 	CShellItemEnumerator enumerator(pParent);
 	if (!enumerator.IsValid()) return;
 
-	const CProgramsExclusions exclusions(GetSettingString(L"ExcludedProgramsPaths"));
 	CComPtr<IShellItem> pChild;
 	CAbsolutePidl childPidl;
 	while (enumerator.GetNext(pChild,childPidl))
@@ -761,7 +759,7 @@ void CProgramsTree::AddSecondFolder( std::vector<CTreeItem*> &items, IShellItem 
 		SFGAOF itemFlags;
 		if (SUCCEEDED(pChild->GetAttributes(SFGAO_FOLDER|SFGAO_HIDDEN,&itemFlags)))
 		{
-			if ((itemFlags&SFGAO_HIDDEN) || exclusions.Matches(pChild))
+			if (itemFlags&SFGAO_HIDDEN)
 				continue;
 			CTreeItem *pItem=new CTreeItem();
 			pItem->bFolder=(itemFlags&SFGAO_FOLDER)!=0;
