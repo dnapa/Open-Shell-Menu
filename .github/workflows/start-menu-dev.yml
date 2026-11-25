@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - start-menu-dev
+      - start-menu-dev-upstream-5
 
 permissions:
   contents: read
