@@ -1653,13 +1653,13 @@ void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCou
 	bool bShowMetro=GetSettingBool(L"RecentMetroApps");
 	const bool bPackagedShortcuts=GetWinVersion()>=WIN_VER_WIN10;
 	CComString userPrograms,commonPrograms;
-	CString extraShortcuts;
+	const CString extraShortcuts=(s_RecentPrograms==RECENT_PROGRAMS_FREQUENT || (bPackagedShortcuts && bShowMetro))?
+		CSearchManager::ResolveExtraShortcutsPath(GetSettingString(L"SearchExtraShortcutsPath")):CString();
 	if (bPackagedShortcuts && bShowMetro)
 	{
 		ShGetKnownFolderPath(FOLDERID_Programs,&userPrograms);
 		if (!s_bNoCommonFolders)
 			ShGetKnownFolderPath(FOLDERID_CommonPrograms,&commonPrograms);
-		extraShortcuts=CSearchManager::ResolveExtraShortcutsPath(GetSettingString(L"SearchExtraShortcutsPath"));
 	}
 	const std::vector<MenuItem> &mainItems=s_Menus[0]->m_Items;
 
@@ -1907,9 +1907,11 @@ void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCou
 					continue;
 			}
 			uaItem.bPackagedShortcut=!packagedAppId.IsEmpty();
+			const bool bExtraShortcut=!uaItem.bPackagedShortcut && !extraShortcuts.IsEmpty() &&
+				IsVisibleProgramsShortcut(uaItem.name,NULL,NULL,extraShortcuts);
 			{
 				CItemManager::RWLock lock(&g_ItemManager,false,CItemManager::RWLOCK_ITEMS);
-				if (!uaItem.bPackagedShortcut && uaItem.pLinkInfo->GetLocation()!=CItemManager::LOCATION_START_MENU &&
+				if (!uaItem.bPackagedShortcut && !bExtraShortcut && uaItem.pLinkInfo->GetLocation()!=CItemManager::LOCATION_START_MENU &&
 					uaItem.pLinkInfo->GetLocation()!=CItemManager::LOCATION_METRO && uaItem.pLinkInfo->GetLocation()!=CItemManager::LOCATION_GAMES)
 				{
 					LOG_MENU(LOG_MFU,L"UserAssist: Dropping: Not from start menu");
