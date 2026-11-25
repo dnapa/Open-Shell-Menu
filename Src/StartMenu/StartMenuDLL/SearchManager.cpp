@@ -17,10 +17,92 @@
 #include <searchapi.h>
 #include <ntquery.h>
 #include <algorithm>
+#include <set>
 
 // attempt to get more accurate PIDLs for the search results by laundering them through a search folder.
 // this produces better search items for the CSC search connector (better icons and behavior) but is slow.
 //#define LAUNDER_SEARCH_RESULTS
+
+static const wchar_t *GetPathSuffix( const wchar_t *path, const CString &prefix )
+{
+	const int length=prefix.GetLength();
+	if (length==0 || wcslen(path)<(size_t)length ||
+		CompareStringOrdinal(path,length,prefix,length,TRUE)!=CSTR_EQUAL)
+		return NULL;
+	return path+length;
+}
+
+CProgramsExclusions::CProgramsExclusions( const CString &setting )
+{
+	if (setting.IsEmpty())
+		return;
+
+	CComString userPrograms, commonPrograms;
+	SHGetKnownFolderPath(FOLDERID_Programs,0,NULL,&userPrograms);
+	SHGetKnownFolderPath(FOLDERID_CommonPrograms,0,NULL,&commonPrograms);
+	CString roots[]={userPrograms?CString(userPrograms):CString(),commonPrograms?CString(commonPrograms):CString()};
+	for (CString &root : roots)
+	{
+		root.Replace(L'/',L'\\');
+		root.TrimRight(L'\\');
+	}
+
+	int pos=0;
+	while (pos>=0)
+	{
+		CString entry=setting.Tokenize(L";\r\n",pos);
+		entry.Trim().Trim(L"\"").Trim();
+		if (entry.IsEmpty())
+			continue;
+
+		wchar_t expanded[_MAX_PATH];
+		const DWORD expandedLength=ExpandEnvironmentStrings(entry,expanded,_countof(expanded));
+		if (expandedLength<=1 || expandedLength>_countof(expanded))
+			continue;
+
+		entry=expanded;
+		entry.Replace(L'/',L'\\');
+		const bool bRelative=entry[0]!=L'\\' && (entry.GetLength()<2 || entry[1]!=L':');
+		const bool bAbsolute=PathIsUNC(entry) ||
+			(entry.GetLength()>=3 && PathGetDriveNumber(entry)>=0 && entry[2]==L'\\');
+		if (!bRelative && !bAbsolute)
+			continue;
+
+		for (const CString &root : roots)
+		{
+			if (root.IsEmpty())
+				continue;
+			const CString candidate=bRelative?(root+L"\\"+entry):entry;
+			wchar_t fullPath[_MAX_PATH];
+			const DWORD length=GetFullPathName(candidate,_countof(fullPath),fullPath,NULL);
+			if (!length || length>=_countof(fullPath))
+				continue;
+			PathRemoveBackslash(fullPath);
+			const wchar_t *suffix=GetPathSuffix(fullPath,root);
+			if (suffix && suffix[0]==L'\\' && suffix[1])
+				m_Paths.push_back(CString(fullPath));
+		}
+	}
+}
+
+bool CProgramsExclusions::Matches( const wchar_t *path ) const
+{
+	for (const CString &excluded : m_Paths)
+	{
+		const wchar_t *suffix=GetPathSuffix(path,excluded);
+		if (suffix && (!*suffix || *suffix==L'\\'))
+			return true;
+	}
+	return false;
+}
+
+bool CProgramsExclusions::Matches( IShellItem *pItem ) const
+{
+	if (m_Paths.empty())
+		return false;
+	CComString path;
+	return SUCCEEDED(pItem->GetDisplayName(SIGDN_FILESYSPATH,&path)) && path && Matches((const wchar_t*)path);
+}
 
 CSearchManager g_SearchManager;
 const CLSID CLSID_CSearchManager2={0x7D096C5F,0xAC08,0x4f1f,{0xBE,0xB7,0x5C,0x22,0xC5,0x17,0xCE,0x39}};
@@ -117,9 +199,19 @@ void CSearchManager::BeginSearch( const CString &searchText )
 		m_SearchRequest.requestId=++m_LastRequestId;
 		m_SearchRequest.bSearchPrograms=GetSettingBool(L"SearchPrograms");
 		m_SearchRequest.bSearchPath=GetSettingBool(L"SearchPath");
+		m_SearchRequest.extraShortcutsPath=GetSettingString(L"SearchExtraShortcutsPath");
+		const CString excludedProgramsPaths=GetSettingString(L"ExcludedProgramsPaths");
+		if (m_SearchRequest.excludedProgramsPaths!=excludedProgramsPaths)
+		{
+			// The previous menu's cached results were collected under a different rule.
+			m_ProgramItemsOld.clear();
+			m_ProgramsHashOld=FNV_HASH0;
+			m_SearchRequest.excludedProgramsPaths=excludedProgramsPaths;
+		}
 		m_SearchRequest.bSearchMetroApps=GetSettingBool(L"SearchMetroApps");
 		m_SearchRequest.bSearchMetroSettings=GetSettingBool(L"SearchMetroSettings");
-		m_SearchRequest.bSearchSettings=m_SearchRequest.bSearchPrograms; //GetSettingBool(L"SearchSettings");
+		m_SearchRequest.bSearchControlPanel=m_SearchRequest.bSearchPrograms && GetSettingBool(L"SearchControlPanel");
+		m_SearchRequest.bSearchAllTasks=m_SearchRequest.bSearchPrograms && GetSettingBool(L"SearchAllTasks");
 		m_SearchRequest.bSearchKeywords=GetSettingBool(L"SearchKeywords");
 		m_SearchRequest.bSearchFiles=GetSettingBool(L"SearchFiles");
 		m_SearchRequest.bSearchMetadata=GetSettingBool(L"SearchContents");
@@ -201,6 +293,9 @@ unsigned int CSearchManager::CalcItemsHash( const std::vector<SearchItem> &items
 		hash=CalcFNVHash(&it->pInfo,sizeof(void*),hash);
 		hash=CalcFNVHash(&it->rank,sizeof(int),hash);
 		hash=CalcFNVHash(&it->bMetroLink,sizeof(bool),hash);
+		hash=CalcFNVHash(&it->bExtraShortcut,sizeof(bool),hash);
+		hash=CalcFNVHash(&it->bAllTasks,sizeof(bool),hash);
+		hash=CalcFNVHash(it->shortcutAppId,hash);
 	}
 	return hash;
 }
@@ -295,22 +390,46 @@ bool CSearchManager::AddSearchItem( IShellItem *pItem, const wchar_t *name, int 
 
 	SearchItem item;
 	item.category=CATEGORY_INVALID;
+	item.bExtraShortcut=(flags&COLLECT_EXTRA_SHORTCUTS)!=0;
+	item.bAllTasks=(flags&COLLECT_ALL_TASKS)!=0;
+	bool bProgramShortcut=false;
 	item.pInfo=g_ItemManager.GetItemInfo(pItem,pidl,CItemManager::INFO_LINK|((flags&COLLECT_METRO)?CItemManager::INFO_METRO:0));
 	{
 		CItemManager::RWLock lock(&g_ItemManager,false,CItemManager::RWLOCK_ITEMS);
+		const bool bFileShortcut=category==CATEGORY_PROGRAM && _wcsicmp(PathFindExtension(item.pInfo->GetPath()),L".lnk")==0;
+		if (item.bExtraShortcut && !bFileShortcut)
+			return false;
 		item.bMetroLink=item.pInfo->IsMetroLink();
 		if ((flags&COLLECT_ONLY_METRO) && !item.bMetroLink)
 			return false;
-		if (item.bMetroLink && (!searchRequest.bSearchMetroApps || _wcsicmp(item.pInfo->GetAppid(),DESKTOP_APP_ID)==0))
+		if (item.bMetroLink && ((!searchRequest.bSearchMetroApps && !item.bExtraShortcut) || _wcsicmp(item.pInfo->GetAppid(),DESKTOP_APP_ID)==0))
 			return false;
 		item.category=category;
-		if (item.bMetroLink)
+		if (item.bMetroLink && !item.bExtraShortcut)
 		{
 			item.name=item.pInfo->GetMetroName();
 			StringUpper(item.name);
 		}
 		else
 			item.name=name;
+		bProgramShortcut=bFileShortcut && GetWinVersion()>=WIN_VER_WIN10 &&
+			(searchRequest.bSearchMetroApps || !searchRequest.extraShortcutsPath.IsEmpty());
+		if (bProgramShortcut)
+			item.shortcutAppId=item.pInfo->GetAppid();
+	}
+	if (bProgramShortcut)
+	{
+		// Some shortcuts expose the packaged app ID only as their target parsing name.
+		if (item.shortcutAppId.IsEmpty() || (!searchRequest.extraShortcutsPath.IsEmpty() &&
+			!IsPackagedAppId(item.shortcutAppId)))
+		{
+			CComQIPtr<IShellItem2> pItem2=pItem;
+			CComString target;
+			if (pItem2 && SUCCEEDED(pItem2->GetString(PKEY_Link_TargetParsingPath,&target)) && target &&
+				(item.shortcutAppId.IsEmpty() || IsPackagedAppId(target)))
+				item.shortcutAppId=target;
+		}
+		StringUpper(item.shortcutAppId);
 	}
 	if (flags&COLLECT_KEYWORDS)
 	{
@@ -363,7 +482,7 @@ bool CSearchManager::AddSearchItem( IShellItem *pItem, const wchar_t *name, int 
 			// remove duplicate settings
 			for (std::vector<SearchItem>::const_iterator it=items.begin();it!=items.end();++it)
 			{
-				if (wcscmp(it->name,item.name)==0 && it->bMetroLink==item.bMetroLink)
+				if (wcscmp(it->name,item.name)==0 && it->bMetroLink==item.bMetroLink && it->bAllTasks==item.bAllTasks)
 				{
 					item.category=CATEGORY_INVALID;
 					break;
@@ -412,7 +531,7 @@ bool CSearchManager::AddSearchItem( IShellItem *pItem, const wchar_t *name, int 
 	return res;
 }
 
-void CSearchManager::CollectSearchItems( IShellItem *pFolder, int flags, TItemCategory category, SearchRequest &searchRequest )
+void CSearchManager::CollectSearchItems( IShellItem *pFolder, int flags, TItemCategory category, SearchRequest &searchRequest, const CProgramsExclusions *exclusions )
 {
 	CComPtr<IEnumShellItems> pEnum;
 	pFolder->BindToHandler(NULL,BHID_EnumItems,IID_IEnumShellItems,(void**)&pEnum);
@@ -434,12 +553,12 @@ void CSearchManager::CollectSearchItems( IShellItem *pFolder, int flags, TItemCa
 		SFGAOF itemFlags;
 		if (SUCCEEDED(pChild->GetAttributes(SFGAO_FOLDER|SFGAO_STREAM|SFGAO_LINK|SFGAO_HIDDEN,&itemFlags)))
 		{
-			if (itemFlags&SFGAO_HIDDEN)
+			if ((itemFlags&SFGAO_HIDDEN) || (exclusions && exclusions->Matches(pChild)))
 				continue;
 			if ((flags&COLLECT_RECURSIVE) && (itemFlags&(SFGAO_FOLDER|SFGAO_STREAM|SFGAO_LINK))==SFGAO_FOLDER)
 			{
 				// go into subfolders but not archives or links to folders
-				CollectSearchItems(pChild,flags,category,searchRequest);
+				CollectSearchItems(pChild,flags,category,searchRequest,exclusions);
 				if (category==CATEGORY_PROGRAM || category==CATEGORY_SETTING || category==CATEGORY_METROSETTING)
 				{
 					if (searchRequest.requestId<m_LastProgramsRequestId)
@@ -451,6 +570,8 @@ void CSearchManager::CollectSearchItems( IShellItem *pFolder, int flags, TItemCa
 						break;
 				}
 			}
+			if ((flags&COLLECT_EXTRA_SHORTCUTS) && !(itemFlags&SFGAO_LINK))
+				continue;
 			if ((flags&COLLECT_FOLDERS) || !(itemFlags&SFGAO_FOLDER))
 			{
 				CComString pName;
@@ -563,6 +684,25 @@ bool CSearchManager::SearchScope::ParseSearchConnector( const wchar_t *fname )
 	return false;
 }
 
+CString CSearchManager::ResolveExtraShortcutsPath( const CString &setting )
+{
+	if (setting.IsEmpty())
+		return CString();
+
+	wchar_t expanded[_MAX_PATH],path[_MAX_PATH];
+	const DWORD length=ExpandEnvironmentStrings(setting,expanded,_countof(expanded));
+	if (!length || length>_countof(expanded) || PathIsRelative(expanded))
+		return CString();
+	const DWORD fullLength=GetFullPathName(expanded,_countof(path),path,NULL);
+	if (!fullLength || fullLength>=_countof(path))
+		return CString();
+	PathRemoveBackslash(path);
+	const DWORD attributes=GetFileAttributes(path);
+	if (attributes==INVALID_FILE_ATTRIBUTES || !(attributes&FILE_ATTRIBUTE_DIRECTORY) || (attributes&FILE_ATTRIBUTE_HIDDEN))
+		return CString();
+	return CString(path);
+}
+
 void CSearchManager::SearchThread( void )
 {
 	HANDLE events[2]={m_SearchEvent,m_ExitEvent};
@@ -613,15 +753,19 @@ void CSearchManager::SearchThread( void )
 				continue;
 			if (m_ProgramItems.empty() && searchRequest.bSearchPrograms)
 			{
-				if (!m_ProgramItemsOld.empty())
+				bool bHaveCachedPrograms;
 				{
-					CMenuContainer::RefreshSearch();
+					Lock lock(this,LOCK_DATA);
+					bHaveCachedPrograms=!m_ProgramItemsOld.empty();
 				}
+				if (bHaveCachedPrograms)
+					CMenuContainer::RefreshSearch();
+				const CProgramsExclusions exclusions(searchRequest.excludedProgramsPaths);
 				// collect programs from the start menu
 				{
 					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_StartMenu,&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest);
+						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest,&exclusions);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
@@ -631,7 +775,7 @@ void CSearchManager::SearchThread( void )
 				{
 					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_CommonStartMenu,&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest);
+						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest,&exclusions);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
@@ -644,7 +788,7 @@ void CSearchManager::SearchThread( void )
 					DoEnvironmentSubst(path,_MAX_PATH);
 					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(SHCreateItemFromParsingName(path,NULL,IID_IShellItem,(void**)&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest);
+						CollectSearchItems(pFolder,COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest,&exclusions);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
@@ -653,7 +797,18 @@ void CSearchManager::SearchThread( void )
 				{
 					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_Games,&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest);
+						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest,&exclusions);
+					if (searchRequest.requestId<m_LastProgramsRequestId)
+						continue;
+				}
+
+				// Collect user shortcuts from the optional folder after the normal Start Menu.
+				if (!searchRequest.extraShortcutsPath.IsEmpty())
+				{
+					const CString path=ResolveExtraShortcutsPath(searchRequest.extraShortcutsPath);
+					CComPtr<IShellItem> pFolder;
+					if (!path.IsEmpty() && SUCCEEDED(SHCreateItemFromParsingName(path,NULL,IID_PPV_ARGS(&pFolder))))
+						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_FOLDERS|COLLECT_METRO|COLLECT_NOREFRESH|COLLECT_EXTRA_SHORTCUTS,CATEGORY_PROGRAM,searchRequest,&exclusions);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
@@ -671,7 +826,7 @@ void CSearchManager::SearchThread( void )
 						DoEnvironmentSubst(token,_countof(token));
 						CComPtr<IShellItem> pFolder;
 						if (SUCCEEDED(SHCreateItemFromParsingName(token,NULL,IID_IShellItem,(void**)&pFolder)))
-							CollectSearchItems(pFolder,COLLECT_PROGRAMS|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest);
+							CollectSearchItems(pFolder,COLLECT_PROGRAMS|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest,&exclusions);
 						if (searchRequest.requestId<m_LastProgramsRequestId)
 							continue;
 					}
@@ -684,15 +839,29 @@ void CSearchManager::SearchThread( void )
 				{
 					std::vector<MetroLink> links;
 					GetMetroLinks(links,true);
+					std::set<CString> appIds;
+					{
+						Lock lock(this,LOCK_DATA);
+						for (const SearchItem &item : m_ProgramItems)
+							if (!item.shortcutAppId.IsEmpty())
+								appIds.insert(item.shortcutAppId);
+					}
 					for (std::vector<MetroLink>::const_iterator it=links.begin();it!=links.end();++it)
 					{
 						if (GetWinVersion()<WIN_VER_WIN10)
 							AddSearchItem(it->pItem,L"",COLLECT_PROGRAMS|COLLECT_METRO|COLLECT_ONLY_METRO,CATEGORY_PROGRAM,searchRequest);
 						else
 						{
-							CComString pName;
-							if (SUCCEEDED(it->pItem->GetDisplayName(SIGDN_NORMALDISPLAY,&pName)))
-							AddSearchItem(it->pItem,pName,COLLECT_PROGRAMS|COLLECT_METRO,CATEGORY_PROGRAM,searchRequest);
+							CString appId=it->appid;
+							StringUpper(appId);
+							if (appId.IsEmpty() || appIds.find(appId)==appIds.end())
+							{
+								CComString pName;
+								if (SUCCEEDED(it->pItem->GetDisplayName(SIGDN_NORMALDISPLAY,&pName)) &&
+									AddSearchItem(it->pItem,pName,COLLECT_PROGRAMS|COLLECT_METRO,CATEGORY_PROGRAM,searchRequest) &&
+									!appId.IsEmpty())
+									appIds.insert(appId);
+							}
 						}
 						if (searchRequest.requestId<m_LastProgramsRequestId)
 							continue;
@@ -710,13 +879,14 @@ void CSearchManager::SearchThread( void )
 				searchRequest.searchTime=GetTickCount();
 			}
 
-			if (m_SettingsItems.empty() && searchRequest.bSearchSettings)
+			if (m_SettingsItems.empty() && searchRequest.bSearchPrograms &&
+				(searchRequest.bSearchControlPanel || searchRequest.bSearchAllTasks || searchRequest.bSearchMetroSettings))
 			{
 				if (!m_SettingsItemsOld.empty())
 				{
 					CMenuContainer::RefreshSearch();
 				}
-				// collect items from the control panel, admin tools, and the god mode
+				if (searchRequest.bSearchControlPanel)
 				{
 					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_ControlPanelFolder,&pFolder)))
@@ -724,25 +894,11 @@ void CSearchManager::SearchThread( void )
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
+				if (searchRequest.bSearchAllTasks)
 				{
 					CComPtr<IShellItem> pFolder;
-					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_AdminTools,&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
-					if (searchRequest.requestId<m_LastProgramsRequestId)
-						continue;
-				}
-				if (!searchRequest.bNoCommonFolders)
-				{
-					CComPtr<IShellItem> pFolder;
-					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_CommonAdminTools,&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
-					if (searchRequest.requestId<m_LastProgramsRequestId)
-						continue;
-				}
-				{
-					CComPtr<IShellItem> pFolder;
-					if (SUCCEEDED(SHCreateItemFromParsingName(L"shell:::{ED7BA470-8E54-465E-825C-99712043E01C}",NULL,IID_IShellItem,(void**)&pFolder)))
-						CollectSearchItems(pFolder,(searchRequest.bSearchKeywords?COLLECT_KEYWORDS:0)|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
+					if (SUCCEEDED(SHCreateItemFromParsingName(L"shell:::{ED7BA470-8E54-465E-825C-99712043E01C}",NULL,IID_PPV_ARGS(&pFolder))))
+						CollectSearchItems(pFolder,COLLECT_ALL_TASKS|(searchRequest.bSearchKeywords?COLLECT_KEYWORDS:0)|COLLECT_NOREFRESH,CATEGORY_SETTING,searchRequest);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
@@ -1368,6 +1524,7 @@ DWORD CALLBACK CSearchManager::StaticSearchThread( void *param )
 void CSearchManager::GetSearchResults( SearchResults &results )
 {
 	results.programs.clear();
+	results.allTasks.clear();
 	results.settings.clear();
 	results.metrosettings.clear();
 	results.indexed.clear();
@@ -1381,11 +1538,23 @@ void CSearchManager::GetSearchResults( SearchResults &results )
 		{
 			std::vector<SearchItem> &programs=m_bProgramsFound?m_ProgramItems:m_ProgramItemsOld;
 			std::sort(programs.begin(),programs.end());
+			std::set<CString> matchingShortcutApps;
+			if (std::any_of(programs.begin(),programs.end(),[](const SearchItem &item) { return item.bExtraShortcut; }))
+			{
+				// If both shortcuts match the query, prefer the one in the ordinary Programs sources.
+				for (const SearchItem &item : programs)
+					if (!item.bExtraShortcut && item.category==CATEGORY_PROGRAM && !item.shortcutAppId.IsEmpty() &&
+						item.MatchText(m_SearchText,bSearchSubWord))
+						matchingShortcutApps.insert(item.shortcutAppId);
+			}
 			std::vector<const SearchItem*> foundItems;
 			for (std::vector<SearchItem>::const_iterator it=programs.begin();it!=programs.end();++it)
 			{
 				if (it->category==CATEGORY_PROGRAM && it->MatchText(m_SearchText,bSearchSubWord))
 				{
+					const bool bExtraPackagedShortcut=it->bExtraShortcut && IsPackagedAppId(it->shortcutAppId);
+					if (bExtraPackagedShortcut && matchingShortcutApps.find(it->shortcutAppId)!=matchingShortcutApps.end())
+						continue;
 					bool bDuplicate=false;
 					bool bAppResolved=false;
 					for (std::vector<const SearchItem*>::const_iterator it2=foundItems.begin();it2!=foundItems.end();++it2)
@@ -1410,6 +1579,8 @@ void CSearchManager::GetSearchResults( SearchResults &results )
 					{
 						results.programs.push_back(it->pInfo);
 						foundItems.push_back(&*it);
+						if (bExtraPackagedShortcut)
+							matchingShortcutApps.insert(it->shortcutAppId);
 					}
 				}
 			}
@@ -1427,8 +1598,9 @@ void CSearchManager::GetSearchResults( SearchResults &results )
 			{
 				if (it->MatchText(m_SearchText, bSearchSubWord))
 				{
-					if (it->category==CATEGORY_SETTING)
-						results.settings.push_back(it->pInfo);
+					if (it->category==CATEGORY_SETTING &&
+						(it->bAllTasks?m_SearchRequest.bSearchAllTasks:m_SearchRequest.bSearchControlPanel))
+						(it->bAllTasks?results.allTasks:results.settings).push_back(it->pInfo);
 					if (it->category==CATEGORY_METROSETTING)
 						results.metrosettings.push_back(it->pInfo);
 				}
@@ -1450,7 +1622,7 @@ void CSearchManager::GetSearchResults( SearchResults &results )
 				results.autocomplete.push_back(it->pInfo);
 		}
 	}
-	results.bResults=(!results.programs.empty() || !results.settings.empty() || !results.metrosettings.empty() || !results.indexed.empty() || !results.autocomplete.empty());
+	results.bResults=(!results.programs.empty() || !results.settings.empty() || !results.allTasks.empty() || !results.metrosettings.empty() || !results.indexed.empty() || !results.autocomplete.empty());
 	results.bSearching=(m_LastCompletedId!=m_LastRequestId);
 }
 

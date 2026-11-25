@@ -4289,6 +4289,7 @@ CSetting g_Settings[]={
 	{L"OpenPrograms",CSetting::TYPE_BOOL,IDS_OPEN_PROGRAMS,IDS_OPEN_PROGRAMS_TIP,0,CSetting::FLAG_MENU_WIN7,L"ProgramsStyle=1",L"Inline"},
 	{L"ProgramsMenuDelay",CSetting::TYPE_INT,IDS_PROGRAMS_DELAY,IDS_PROGRAMS_DELAY_TIP,200,CSetting::FLAG_MENU_WIN7,L"ProgramsStyle=1",L"Inline"}, // 2x system delay time
 	{L"HideProgramsMetro",CSetting::TYPE_BOOL,IDS_HIDE_APPS,IDS_HIDE_APPS_TIP,1},
+	{L"ExcludedProgramsPaths",CSetting::TYPE_STRING,IDS_EXCLUDED_PROGRAMS_PATHS,IDS_EXCLUDED_PROGRAMS_PATHS_TIP,L""},
 	{L"PinnedPrograms",CSetting::TYPE_INT,IDS_PINNED_PROGRAMS,IDS_PINNED_PROGRAMS_TIP,PINNED_PROGRAMS_PINNED},
 		{L"FastItems",CSetting::TYPE_RADIO,IDS_FAST_ITEMS,IDS_FAST_ITEMS_TIP},
 		{L"PinnedItems",CSetting::TYPE_RADIO,IDS_PINNED_ITEMS,IDS_PINNED_ITEMS_TIP},
@@ -4387,7 +4388,10 @@ CSetting g_Settings[]={
 	{L"SearchAutoComplete",CSetting::TYPE_BOOL,IDS_SEARCH_AUTO,IDS_SEARCH_AUTO_TIP,1,0,L"SearchBox"},
 	{L"SearchPrograms",CSetting::TYPE_BOOL,IDS_SEARCH_PROGRAMS,IDS_SEARCH_PROGRAMS_TIP,1,0,L"SearchBox"},
 		{L"SearchPath",CSetting::TYPE_BOOL,IDS_SEARCH_PATH,IDS_SEARCH_PATH_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
+		{L"SearchExtraShortcutsPath",CSetting::TYPE_DIRECTORY,IDS_SEARCH_EXTRA_SHORTCUTS,IDS_SEARCH_EXTRA_SHORTCUTS_TIP,L"",0,L"#SearchPrograms",L"SearchPrograms"},
 		{L"SearchMetroApps",CSetting::TYPE_BOOL,IDS_SEARCH_METRO,IDS_SEARCH_METRO_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
+		{L"SearchControlPanel",CSetting::TYPE_BOOL,IDS_SEARCH_CONTROL_PANEL,IDS_SEARCH_CONTROL_PANEL_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
+		{L"SearchAllTasks",CSetting::TYPE_BOOL,IDS_SEARCH_ALL_TASKS,IDS_SEARCH_ALL_TASKS_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
 		{L"SearchMetroSettings",CSetting::TYPE_BOOL,IDS_SEARCH_METROS,IDS_SEARCH_METROS_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
 		{L"SearchKeywords",CSetting::TYPE_BOOL,IDS_SEARCH_KEYWORDS,IDS_SEARCH_KEYWORDS_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
 		{L"SearchSubWord",CSetting::TYPE_BOOL,IDS_SUB_WORD,IDS_SUB_WORD_TIP,1,0,L"#SearchPrograms",L"SearchPrograms"},
@@ -5168,13 +5172,12 @@ void InitSettings( void )
 	InitSettings(g_Settings,COMPONENT_MENU,&g_CustomSettings);
 }
 
-static int g_ButtonPath, g_ButtonSize, g_ButtonIcon, g_ButtonOffset, g_ButtonIconSize, g_ButtonText, g_ButtonTip, g_ButtonAllTaskbars;
+static int g_ButtonPath, g_ButtonSize, g_ButtonIcon, g_ButtonOffset, g_ButtonIconSize, g_ButtonText, g_ButtonTip;
 static bool g_bButtonEnable, g_bTaskbarsChanged, g_bTaskbarsUpdated;
 
 static void StoreButtonSettings( void )
 {
 	g_bButtonEnable=GetSettingBool(L"EnableStartButton");
-	g_ButtonAllTaskbars=GetSettingBool(L"AllTaskbars");
 	g_ButtonTip=CalcFNVHash(GetSettingString(L"StartButtonTip"));
 	g_ButtonPath=GetSettingInt(L"StartButtonType");
 	g_ButtonIcon=0;
@@ -5193,7 +5196,6 @@ static void StoreButtonSettings( void )
 
 static void UpdateButtons( bool bForce )
 {
-	int allTaskbars=GetSettingBool(L"AllTaskbars");
 	int tip=CalcFNVHash(GetSettingString(L"StartButtonTip"));
 	int path=GetSettingInt(L"StartButtonType");
 	int icon=0;
@@ -5206,7 +5208,7 @@ static void UpdateButtons( bool bForce )
 	if (path==START_BUTTON_CUSTOM)
 		path=CalcFNVHash(GetSettingString(L"StartButtonPath"));
 	bool bRecreate=(g_bButtonEnable!=GetSettingBool(L"EnableStartButton") || path!=g_ButtonPath || g_ButtonSize!=GetSettingInt(L"StartButtonSize") || g_ButtonOffset!=GetSettingInt(L"StartButtonOffset")
-		|| g_ButtonIcon!=icon || g_ButtonIconSize!=GetSettingInt(L"StartButtonIconSize") || g_ButtonText!=text || g_ButtonTip!=tip || g_ButtonAllTaskbars!=allTaskbars);
+		|| g_ButtonIcon!=icon || g_ButtonIconSize!=GetSettingInt(L"StartButtonIconSize") || g_ButtonText!=text || g_ButtonTip!=tip);
 	if ((g_bTaskbarsChanged && !g_bTaskbarsUpdated) || bForce || bRecreate)
 	{
 		UpdateTaskBars(bRecreate?TASKBAR_RECREATE_BUTTONS:TASKBAR_UPDATE);
