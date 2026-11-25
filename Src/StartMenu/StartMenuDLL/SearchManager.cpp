@@ -23,6 +23,87 @@
 // this produces better search items for the CSC search connector (better icons and behavior) but is slow.
 //#define LAUNDER_SEARCH_RESULTS
 
+static const wchar_t *GetPathSuffix( const wchar_t *path, const CString &prefix )
+{
+	const int length=prefix.GetLength();
+	if (length==0 || wcslen(path)<(size_t)length ||
+		CompareStringOrdinal(path,length,prefix,length,TRUE)!=CSTR_EQUAL)
+		return NULL;
+	return path+length;
+}
+
+CProgramsExclusions::CProgramsExclusions( const CString &setting )
+{
+	if (setting.IsEmpty())
+		return;
+
+	CComString userPrograms, commonPrograms;
+	SHGetKnownFolderPath(FOLDERID_Programs,0,NULL,&userPrograms);
+	SHGetKnownFolderPath(FOLDERID_CommonPrograms,0,NULL,&commonPrograms);
+	CString roots[]={userPrograms?CString(userPrograms):CString(),commonPrograms?CString(commonPrograms):CString()};
+	for (CString &root : roots)
+	{
+		root.Replace(L'/',L'\\');
+		root.TrimRight(L'\\');
+	}
+
+	int pos=0;
+	while (pos>=0)
+	{
+		CString entry=setting.Tokenize(L";\r\n",pos);
+		entry.Trim().Trim(L"\"").Trim();
+		if (entry.IsEmpty())
+			continue;
+
+		wchar_t expanded[_MAX_PATH];
+		const DWORD expandedLength=ExpandEnvironmentStrings(entry,expanded,_countof(expanded));
+		if (expandedLength<=1 || expandedLength>_countof(expanded))
+			continue;
+
+		entry=expanded;
+		entry.Replace(L'/',L'\\');
+		const bool bRelative=entry[0]!=L'\\' && (entry.GetLength()<2 || entry[1]!=L':');
+		const bool bAbsolute=PathIsUNC(entry) ||
+			(entry.GetLength()>=3 && PathGetDriveNumber(entry)>=0 && entry[2]==L'\\');
+		if (!bRelative && !bAbsolute)
+			continue;
+
+		for (const CString &root : roots)
+		{
+			if (root.IsEmpty())
+				continue;
+			const CString candidate=bRelative?(root+L"\\"+entry):entry;
+			wchar_t fullPath[_MAX_PATH];
+			const DWORD length=GetFullPathName(candidate,_countof(fullPath),fullPath,NULL);
+			if (!length || length>=_countof(fullPath))
+				continue;
+			PathRemoveBackslash(fullPath);
+			const wchar_t *suffix=GetPathSuffix(fullPath,root);
+			if (suffix && suffix[0]==L'\\' && suffix[1])
+				m_Paths.push_back(CString(fullPath));
+		}
+	}
+}
+
+bool CProgramsExclusions::Matches( const wchar_t *path ) const
+{
+	for (const CString &excluded : m_Paths)
+	{
+		const wchar_t *suffix=GetPathSuffix(path,excluded);
+		if (suffix && (!*suffix || *suffix==L'\\'))
+			return true;
+	}
+	return false;
+}
+
+bool CProgramsExclusions::Matches( IShellItem *pItem ) const
+{
+	if (m_Paths.empty())
+		return false;
+	CComString path;
+	return SUCCEEDED(pItem->GetDisplayName(SIGDN_FILESYSPATH,&path)) && path && Matches((const wchar_t*)path);
+}
+
 CSearchManager g_SearchManager;
 const CLSID CLSID_CSearchManager2={0x7D096C5F,0xAC08,0x4f1f,{0xBE,0xB7,0x5C,0x22,0xC5,0x17,0xCE,0x39}};
 
@@ -119,6 +200,14 @@ void CSearchManager::BeginSearch( const CString &searchText )
 		m_SearchRequest.bSearchPrograms=GetSettingBool(L"SearchPrograms");
 		m_SearchRequest.bSearchPath=GetSettingBool(L"SearchPath");
 		m_SearchRequest.extraShortcutsPath=GetSettingString(L"SearchExtraShortcutsPath");
+		const CString excludedProgramsPaths=GetSettingString(L"ExcludedProgramsPaths");
+		if (m_SearchRequest.excludedProgramsPaths!=excludedProgramsPaths)
+		{
+			// The previous menu's cached results were collected under a different rule.
+			m_ProgramItemsOld.clear();
+			m_ProgramsHashOld=FNV_HASH0;
+			m_SearchRequest.excludedProgramsPaths=excludedProgramsPaths;
+		}
 		m_SearchRequest.bSearchMetroApps=GetSettingBool(L"SearchMetroApps");
 		m_SearchRequest.bSearchMetroSettings=GetSettingBool(L"SearchMetroSettings");
 		m_SearchRequest.bSearchControlPanel=m_SearchRequest.bSearchPrograms && GetSettingBool(L"SearchControlPanel");
@@ -442,7 +531,7 @@ bool CSearchManager::AddSearchItem( IShellItem *pItem, const wchar_t *name, int 
 	return res;
 }
 
-void CSearchManager::CollectSearchItems( IShellItem *pFolder, int flags, TItemCategory category, SearchRequest &searchRequest )
+void CSearchManager::CollectSearchItems( IShellItem *pFolder, int flags, TItemCategory category, SearchRequest &searchRequest, const CProgramsExclusions *exclusions )
 {
 	CComPtr<IEnumShellItems> pEnum;
 	pFolder->BindToHandler(NULL,BHID_EnumItems,IID_IEnumShellItems,(void**)&pEnum);
@@ -464,12 +553,12 @@ void CSearchManager::CollectSearchItems( IShellItem *pFolder, int flags, TItemCa
 		SFGAOF itemFlags;
 		if (SUCCEEDED(pChild->GetAttributes(SFGAO_FOLDER|SFGAO_STREAM|SFGAO_LINK|SFGAO_HIDDEN,&itemFlags)))
 		{
-			if (itemFlags&SFGAO_HIDDEN)
+			if ((itemFlags&SFGAO_HIDDEN) || (exclusions && exclusions->Matches(pChild)))
 				continue;
 			if ((flags&COLLECT_RECURSIVE) && (itemFlags&(SFGAO_FOLDER|SFGAO_STREAM|SFGAO_LINK))==SFGAO_FOLDER)
 			{
 				// go into subfolders but not archives or links to folders
-				CollectSearchItems(pChild,flags,category,searchRequest);
+				CollectSearchItems(pChild,flags,category,searchRequest,exclusions);
 				if (category==CATEGORY_PROGRAM || category==CATEGORY_SETTING || category==CATEGORY_METROSETTING)
 				{
 					if (searchRequest.requestId<m_LastProgramsRequestId)
@@ -664,15 +753,19 @@ void CSearchManager::SearchThread( void )
 				continue;
 			if (m_ProgramItems.empty() && searchRequest.bSearchPrograms)
 			{
-				if (!m_ProgramItemsOld.empty())
+				bool bHaveCachedPrograms;
 				{
-					CMenuContainer::RefreshSearch();
+					Lock lock(this,LOCK_DATA);
+					bHaveCachedPrograms=!m_ProgramItemsOld.empty();
 				}
+				if (bHaveCachedPrograms)
+					CMenuContainer::RefreshSearch();
+				const CProgramsExclusions exclusions(searchRequest.excludedProgramsPaths);
 				// collect programs from the start menu
 				{
 					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_StartMenu,&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest);
+						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest,&exclusions);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
@@ -682,7 +775,7 @@ void CSearchManager::SearchThread( void )
 				{
 					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_CommonStartMenu,&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest);
+						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest,&exclusions);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
@@ -695,7 +788,7 @@ void CSearchManager::SearchThread( void )
 					DoEnvironmentSubst(path,_MAX_PATH);
 					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(SHCreateItemFromParsingName(path,NULL,IID_IShellItem,(void**)&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest);
+						CollectSearchItems(pFolder,COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest,&exclusions);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
@@ -704,7 +797,7 @@ void CSearchManager::SearchThread( void )
 				{
 					CComPtr<IShellItem> pFolder;
 					if (SUCCEEDED(ShGetKnownFolderItem(FOLDERID_Games,&pFolder)))
-						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest);
+						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_METRO|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest,&exclusions);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
@@ -715,7 +808,7 @@ void CSearchManager::SearchThread( void )
 					const CString path=ResolveExtraShortcutsPath(searchRequest.extraShortcutsPath);
 					CComPtr<IShellItem> pFolder;
 					if (!path.IsEmpty() && SUCCEEDED(SHCreateItemFromParsingName(path,NULL,IID_PPV_ARGS(&pFolder))))
-						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_FOLDERS|COLLECT_METRO|COLLECT_NOREFRESH|COLLECT_EXTRA_SHORTCUTS,CATEGORY_PROGRAM,searchRequest);
+						CollectSearchItems(pFolder,COLLECT_RECURSIVE|COLLECT_FOLDERS|COLLECT_METRO|COLLECT_NOREFRESH|COLLECT_EXTRA_SHORTCUTS,CATEGORY_PROGRAM,searchRequest,&exclusions);
 					if (searchRequest.requestId<m_LastProgramsRequestId)
 						continue;
 				}
@@ -733,7 +826,7 @@ void CSearchManager::SearchThread( void )
 						DoEnvironmentSubst(token,_countof(token));
 						CComPtr<IShellItem> pFolder;
 						if (SUCCEEDED(SHCreateItemFromParsingName(token,NULL,IID_IShellItem,(void**)&pFolder)))
-							CollectSearchItems(pFolder,COLLECT_PROGRAMS|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest);
+							CollectSearchItems(pFolder,COLLECT_PROGRAMS|COLLECT_NOREFRESH,CATEGORY_PROGRAM,searchRequest,&exclusions);
 						if (searchRequest.requestId<m_LastProgramsRequestId)
 							continue;
 					}

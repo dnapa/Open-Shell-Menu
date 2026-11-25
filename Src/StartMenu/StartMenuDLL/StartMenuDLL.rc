@@ -1205,6 +1205,8 @@ BEGIN
     IDS_COLUMN_COMMAND      "Command"
     IDS_COLUMN_DISPLAY      "Display"
     IDS_HIDE_APPS           "Hide app shortcuts"
+    IDS_EXCLUDED_PROGRAMS_PATHS "Hide Programs folders and shortcuts"
+    IDS_EXCLUDED_PROGRAMS_PATHS_TIP "Separate paths with semicolons. Relative paths are checked in both Windows Programs folders. Full paths can select one folder or shortcut. This only affects Open-Shell."
     IDS_HIDE_APPS_TIP       "When this is checked, the shortcuts to Metro apps that are outside of the dedicated Apps folder will be hidden"
     IDS_HYBRID_SHUTDOWN     "Enable hybrid shutdown"
     IDS_HYBRID_SHUTDOWN_TIP "When this is checked, the shutdown button will perform the faster hybrid shutdown. You can still do a full shutdown by holding down Shift"

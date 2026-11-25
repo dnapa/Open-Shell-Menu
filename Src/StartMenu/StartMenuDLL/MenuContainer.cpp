@@ -805,13 +805,14 @@ void CMenuContainer::AddFirstFolder( IShellItem *pFolder, std::vector<MenuItem> 
 		refreshFlags|=CItemManager::INFO_LINK|CItemManager::INFO_METRO;
 	if (options&CONTAINER_NOPATH)
 		refreshFlags|=CItemManager::INFO_NO_PATH;
+	const CProgramsExclusions exclusions(GetSettingString(L"ExcludedProgramsPaths"));
 	while (enumerator.GetNext(pChild,childPidl))
 	{
 		SFGAOF flags=0;
 		HRESULT hrFlags=pChild->GetAttributes(SFGAO_FOLDER|SFGAO_STREAM|SFGAO_LINK|SFGAO_HIDDEN,&flags);
 		if (FAILED(hrFlags)) // check if the item is a folder, archive or a link
 			flags=0;
-		if (flags&SFGAO_HIDDEN)
+		if ((flags&SFGAO_HIDDEN) || exclusions.Matches(pChild))
 			continue;
 		CComString pName;
 		if (SUCCEEDED(pChild->GetDisplayName(SIGDN_PARENTRELATIVEPARSING,&pName)))
@@ -915,13 +916,14 @@ void CMenuContainer::AddSecondFolder( IShellItem *pFolder, std::vector<MenuItem>
 	}
 	if (options&CONTAINER_PROGRAMS)
 		refreshFlags|=CItemManager::INFO_LINK|CItemManager::INFO_METRO;
+	const CProgramsExclusions exclusions(GetSettingString(L"ExcludedProgramsPaths"));
 	while (enumerator.GetNext(pChild,childPidl))
 	{
 		SFGAOF flags=0;
 		HRESULT hrFlags=pChild->GetAttributes(SFGAO_FOLDER|SFGAO_STREAM|SFGAO_LINK|SFGAO_HIDDEN,&flags);
 		if (FAILED(hrFlags)) // check if the item is a folder, archive or a link
 			flags=0;
-		if (flags&SFGAO_HIDDEN)
+		if ((flags&SFGAO_HIDDEN) || exclusions.Matches(pChild))
 			continue;
 		CComString pName;
 		if (SUCCEEDED(pChild->GetDisplayName(SIGDN_PARENTRELATIVEPARSING,&pName)))
@@ -1647,6 +1649,7 @@ static bool IsVisibleProgramsShortcut( const CString &path, const wchar_t *userP
 
 void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCount )
 {
+	const CProgramsExclusions exclusions(GetSettingString(L"ExcludedProgramsPaths"));
 	bool bShowMetro=GetSettingBool(L"RecentMetroApps");
 	const bool bPackagedShortcuts=GetWinVersion()>=WIN_VER_WIN10;
 	CComString userPrograms,commonPrograms;
@@ -1679,7 +1682,7 @@ void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCou
 			}
 			else if (SUCCEEDED(MenuParseDisplayName(s_MRUShortcuts[i],&pidl,NULL,NULL)))
 				SHCreateItemFromIDList(pidl,IID_IShellItem,(void**)&pItem);
-			if (pItem)
+			if (pItem && !exclusions.Matches(pItem))
 			{
 				CComString pName;
 				if (SUCCEEDED(pItem->GetDisplayName(SIGDN_NORMALDISPLAY,&pName)))
@@ -1862,6 +1865,8 @@ void CMenuContainer::GetRecentPrograms( std::vector<MenuItem> &items, int maxCou
 					}
 				}
 			}
+			if (exclusions.Matches(uaItem.name))
+				continue;
 			LOG_MENU(LOG_MFU,L"UserAssist: '%s', %d, %.3f",uaItem.name,data.count,uaItem.rank);
 			bool bIgnore=false;
 			wchar_t NAME[_MAX_PATH];

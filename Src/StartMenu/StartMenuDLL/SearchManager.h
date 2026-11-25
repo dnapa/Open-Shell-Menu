@@ -11,6 +11,17 @@
 
 const int MAX_SEARCH_RESULTS=100; // per category
 
+class CProgramsExclusions
+{
+public:
+	explicit CProgramsExclusions( const CString &setting );
+	bool Matches( IShellItem *pItem ) const;
+	bool Matches( const wchar_t *path ) const;
+
+private:
+	std::vector<CString> m_Paths;
+};
+
 class CSearchManager
 {
 public:
@@ -144,6 +155,7 @@ private:
 		CString searchText;
 		CString autoCompletePath;
 		CString extraShortcutsPath;
+		CString excludedProgramsPaths;
 	};
 
 	// LOCK_DATA
@@ -181,7 +193,7 @@ private:
 	};
 
 	bool AddSearchItem( IShellItem *pItem, const wchar_t *name, int flags, TItemCategory category, SearchRequest &searchRequest );
-	void CollectSearchItems( IShellItem *pFolder, int flags, TItemCategory category, SearchRequest &searchRequest );
+	void CollectSearchItems( IShellItem *pFolder, int flags, TItemCategory category, SearchRequest &searchRequest, const CProgramsExclusions *exclusions=NULL );
 	void CollectIndexItems( IShellItem *pFolder, int flags, TItemCategory category, const wchar_t *groupName );
 
 	enum TLock

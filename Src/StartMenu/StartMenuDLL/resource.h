@@ -794,6 +794,8 @@
 #define IDS_SEARCH_CONTROL_PANEL_TIP    3695
 #define IDS_SEARCH_ALL_TASKS            3696
 #define IDS_SEARCH_ALL_TASKS_TIP        3697
+#define IDS_EXCLUDED_PROGRAMS_PATHS     3698
+#define IDS_EXCLUDED_PROGRAMS_PATHS_TIP 3699
 #define IDS_STRING7001                  7001
 #define IDS_STRING7002                  7002
 #define IDS_STRING7003                  7003
