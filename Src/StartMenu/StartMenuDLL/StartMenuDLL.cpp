@@ -1654,6 +1654,17 @@ static void ComputeTaskbarColors( int *data )
 	data[3]=0;
 }
 
+// Exits the menu and starts it again: StartMenu.exe -reload, from this DLL's folder, makes the running menu exit,
+// waits for it, and carries on as the menu
+static void ReloadStartMenu( void )
+{
+	wchar_t exe[_MAX_PATH];
+	GetModuleFileName(g_Instance,exe,_countof(exe));
+	PathRemoveFileSpec(exe);
+	PathAppend(exe,L"StartMenu.exe");
+	ShellExecute(NULL,NULL,exe,L"-reload",NULL,SW_SHOWNORMAL);
+}
+
 static void ShowWinX( void )
 {
 	if (IsWin11())
@@ -3314,14 +3325,17 @@ static void CleanStartMenuDLL( void )
 	ClearIatHook(g_ShellRegisterHotKeyHook);
 	g_ShellRegisterHotKeyHook=NULL;
 
-	CloseManagers(false);
-	ClearIatHooks();
-
-	// cleanup
+	// close the menu and the settings before the managers. an open menu calls g_SearchManager.CloseMenu() when it is destroyed,
+	// and after CloseManagers that would use the search manager's deleted lock and crash Explorer (exiting with the menu open)
 	if (g_Owner.m_hWnd) g_Owner.DestroyWindow();
 	CloseSettings();
 	CMenuContainer::CloseStartMenu();
 	CMenuFader::ClearAll();
+
+	CloseManagers(false);
+	ClearIatHooks();
+
+	// cleanup
 	UnhookDropTarget();
 	EnableHotkeys(HOTKEYS_CLEAR);
 	HWND hwnd=FindWindow(L"OpenShellMenu.CStartHookWindow",L"StartHookWindow");
@@ -4119,6 +4133,8 @@ if (!g_bTrimHooks)
 						CMD_OPEN_ALL,
 						CMD_EXPLORER,
 						CMD_OPEN_PINNED,
+						CMD_RELOAD,
+						CMD_WINX,
 					};
 
 					// right-click on the start button - open the context menu (Settings, Help, Exit)
@@ -4136,7 +4152,8 @@ if (!g_bTrimHooks)
 						AppendMenu(menu,MF_SEPARATOR,0,0);
 					}
 					int count0=GetMenuItemCount(menu);
-					if (GetSettingBool(L"EnableExplorer"))
+					bool bExplorer=GetSettingBool(L"EnableExplorer");
+					if (bExplorer)
 					{
 						if (!GetSettingString(L"ExplorerPath").IsEmpty())
 							AppendMenu(menu,MF_STRING,CMD_EXPLORER,FindTranslation(L"Menu.Explorer",L"Windows Explorer"));
@@ -4145,17 +4162,27 @@ if (!g_bTrimHooks)
 							AppendMenu(menu,MF_STRING,CMD_OPEN_ALL,FindTranslation(L"Menu.OpenAll",L"O&pen All Users"));
 						if (GetSettingInt(L"PinnedPrograms")==PINNED_PROGRAMS_PINNED)
 							AppendMenu(menu,MF_STRING,CMD_OPEN_PINNED,FindTranslation(L"Menu.OpenPinned",L"O&pen Pinned"));
-						AppendMenu(menu,MF_SEPARATOR,0,0);
 					}
+					// the Win+X menu of Windows, which Shift+right-click opens, for those who don't know the shortcut.
+					// it doesn't open folders, so EnableExplorer doesn't remove it
+					if (winVer>=WIN_VER_WIN8)
+						AppendMenu(menu,MF_STRING,CMD_WINX,FindTranslation(L"Menu.WinXMenu",L"Win+X Menu"));
+					if (bExplorer || winVer>=WIN_VER_WIN8)
+						AppendMenu(menu,MF_SEPARATOR,0,0);
 					if (GetSettingBool(L"EnableSettings"))
 						AppendMenu(menu,MF_STRING,CMD_SETTINGS,FindTranslation(L"Menu.MenuSettings",L"Settings"));
 					if (HasHelp())
 						AppendMenu(menu,MF_STRING,CMD_HELP,FindTranslation(L"Menu.MenuHelp",L"Help"));
 					if (GetSettingBool(L"EnableExit"))
 					{
+						// Reload exits and starts the menu again, so it goes with Exit
+						AppendMenu(menu,MF_STRING,CMD_RELOAD,FindTranslation(L"Menu.MenuReload",L"Reload"));
 						AppendMenu(menu,MF_STRING,CMD_EXIT,FindTranslation(L"Menu.MenuExit",L"Exit"));
 						if (!CMenuContainer::CanShowMenu())
+						{
+							EnableMenuItem(menu,CMD_RELOAD,MF_BYCOMMAND|MF_DISABLED);
 							EnableMenuItem(menu,CMD_EXIT,MF_BYCOMMAND|MF_DISABLED);
+						}
 					}
 					if (GetMenuItemCount(menu)>count0)
 					{
@@ -4170,6 +4197,10 @@ if (!g_bTrimHooks)
 						int res=TrackPopupMenu(menu,TPM_RIGHTBUTTON|TPM_RETURNCMD|(IsLanguageRTL()?TPM_LAYOUTRTL:0),pt0.x,pt0.y,0,msg->hwnd,NULL);
 						DestroyMenu(menu);
 						g_bInMenu=false;
+						if (res==CMD_WINX)
+						{
+							ShowWinX(); // as Shift+right-click does
+						}
 						if (res==CMD_SETTINGS)
 						{
 							EditSettings(false,0);
@@ -4177,6 +4208,11 @@ if (!g_bTrimHooks)
 						if (res==CMD_HELP)
 						{
 							ShowHelp();
+							return TRUE;
+						}
+						if (res==CMD_RELOAD)
+						{
+							ReloadStartMenu();
 							return TRUE;
 						}
 						if (res==CMD_EXIT)

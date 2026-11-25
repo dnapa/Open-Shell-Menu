@@ -5172,12 +5172,13 @@ void InitSettings( void )
 	InitSettings(g_Settings,COMPONENT_MENU,&g_CustomSettings);
 }
 
-static int g_ButtonPath, g_ButtonSize, g_ButtonIcon, g_ButtonOffset, g_ButtonIconSize, g_ButtonText, g_ButtonTip;
+static int g_ButtonPath, g_ButtonSize, g_ButtonIcon, g_ButtonOffset, g_ButtonIconSize, g_ButtonText, g_ButtonTip, g_ButtonAllTaskbars;
 static bool g_bButtonEnable, g_bTaskbarsChanged, g_bTaskbarsUpdated;
 
 static void StoreButtonSettings( void )
 {
 	g_bButtonEnable=GetSettingBool(L"EnableStartButton");
+	g_ButtonAllTaskbars=GetSettingBool(L"AllTaskbars");
 	g_ButtonTip=CalcFNVHash(GetSettingString(L"StartButtonTip"));
 	g_ButtonPath=GetSettingInt(L"StartButtonType");
 	g_ButtonIcon=0;
@@ -5196,6 +5197,7 @@ static void StoreButtonSettings( void )
 
 static void UpdateButtons( bool bForce )
 {
+	int allTaskbars=GetSettingBool(L"AllTaskbars");
 	int tip=CalcFNVHash(GetSettingString(L"StartButtonTip"));
 	int path=GetSettingInt(L"StartButtonType");
 	int icon=0;
@@ -5208,7 +5210,7 @@ static void UpdateButtons( bool bForce )
 	if (path==START_BUTTON_CUSTOM)
 		path=CalcFNVHash(GetSettingString(L"StartButtonPath"));
 	bool bRecreate=(g_bButtonEnable!=GetSettingBool(L"EnableStartButton") || path!=g_ButtonPath || g_ButtonSize!=GetSettingInt(L"StartButtonSize") || g_ButtonOffset!=GetSettingInt(L"StartButtonOffset")
-		|| g_ButtonIcon!=icon || g_ButtonIconSize!=GetSettingInt(L"StartButtonIconSize") || g_ButtonText!=text || g_ButtonTip!=tip);
+		|| g_ButtonIcon!=icon || g_ButtonIconSize!=GetSettingInt(L"StartButtonIconSize") || g_ButtonText!=text || g_ButtonTip!=tip || g_ButtonAllTaskbars!=allTaskbars);
 	if ((g_bTaskbarsChanged && !g_bTaskbarsUpdated) || bForce || bRecreate)
 	{
 		UpdateTaskBars(bRecreate?TASKBAR_RECREATE_BUTTONS:TASKBAR_UPDATE);
