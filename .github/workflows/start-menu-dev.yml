@@ -43,7 +43,10 @@ jobs:
           $packageName = "OpenShell-StartMenu-x64-$($env:GITHUB_SHA.Substring(0, 12))-attempt$env:GITHUB_RUN_ATTEMPT.zip"
           $stage = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'start-menu-package')
           $buildOutput = 'build\bin\Setup64'
-          Copy-Item -LiteralPath "$buildOutput\StartMenu.exe", "$buildOutput\StartMenuDLL.dll" -Destination $stage.FullName
+          $binaries = 'StartMenu.exe', 'StartMenuDLL.dll', 'StartMenuHelper64.dll'
+          foreach ($name in $binaries) {
+            Copy-Item -LiteralPath "$buildOutput\$name" -Destination $stage.FullName -ErrorAction Stop
+          }
 
           Copy-Item -LiteralPath 'LICENSE' -Destination $stage.FullName
 
@@ -59,7 +62,7 @@ jobs:
           }
           $sections | Set-Content -LiteralPath (Join-Path $stage.FullName 'StartMenuL10N.ini') -Encoding utf8BOM
 
-          $checksums = foreach ($name in 'StartMenu.exe', 'StartMenuDLL.dll', 'StartMenuL10N.ini') {
+          $checksums = foreach ($name in ($binaries + 'StartMenuL10N.ini')) {
             $hash = (Get-FileHash -LiteralPath (Join-Path $stage.FullName $name) -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $name"
           }

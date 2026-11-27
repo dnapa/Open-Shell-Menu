@@ -75,6 +75,28 @@ static HRESULT Execute(const wchar_t* cmd)
 	return (intptr_t)::ShellExecute(nullptr, L"open", cmd, nullptr, nullptr, SW_SHOWNORMAL) > 32 ? S_OK : E_FAIL;
 }
 
+static HRESULT ExecuteCommandWithShell(const wchar_t* command)
+{
+	using EvaluateCommandTemplate = HRESULT (WINAPI*)(PCWSTR, PWSTR*, PWSTR*, PWSTR*);
+	auto evaluate = reinterpret_cast<EvaluateCommandTemplate>(
+		GetProcAddress(GetModuleHandle(L"shell32.dll"), "SHEvaluateSystemCommandTemplate"));
+	if (!evaluate)
+		return HRESULT_FROM_WIN32(ERROR_ELEVATION_REQUIRED);
+
+	CComHeapPtr<wchar_t> application;
+	CComHeapPtr<wchar_t> arguments;
+	HRESULT hr = evaluate(command, &application, nullptr, &arguments);
+	if (FAILED(hr))
+		return hr;
+
+	SHELLEXECUTEINFO execute = { sizeof(execute) };
+	execute.lpVerb = L"open";
+	execute.lpFile = application;
+	execute.lpParameters = arguments;
+	execute.nShow = SW_SHOWNORMAL;
+	return ShellExecuteEx(&execute) ? S_OK : HRESULT_FROM_WIN32(GetLastError());
+}
+
 static HRESULT OpenItemByPidl(LPCITEMIDLIST pidl)
 {
 	auto child = ILFindLastID(pidl);
@@ -121,8 +143,15 @@ static HRESULT OpenItemByPidl(LPCITEMIDLIST pidl)
 		STARTUPINFO startupInfo = { sizeof(startupInfo) };
 		PROCESS_INFORMATION processInfo{};
 
-		if (!CreateProcess(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startupInfo, &processInfo))
-			return E_FAIL;
+		// CreateProcess can modify its input, so keep the command for the ShellExecute fallback.
+		std::wstring processCommand(cmd);
+		if (!CreateProcess(nullptr, processCommand.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startupInfo, &processInfo))
+		{
+			const DWORD error = GetLastError();
+			if (error == ERROR_ELEVATION_REQUIRED)
+				return ExecuteCommandWithShell(cmd.c_str());
+			return HRESULT_FROM_WIN32(error);
+		}
 
 		CloseHandle(processInfo.hThread);
 		CloseHandle(processInfo.hProcess);
